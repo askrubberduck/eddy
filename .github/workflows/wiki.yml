@@ -1,0 +1,104 @@
+# Publishes `wiki/` to the repository's GitHub wiki.
+#
+# The repository directory is the source and this is a mirror of it. Invariant 4 says behaviour and
+# `wiki/` move in the same commit, which only holds if there is one place to edit — so this pushes
+# one way and never reads back. An edit made in the GitHub wiki UI is overwritten by the next run,
+# deliberately: the alternative is two sources that disagree and no rule for which wins.
+#
+# Two things this needs that are not defaults, both of them GitHub's constraints rather than choices:
+#
+#   1. The wiki's git repository does not exist until the first page is created through the web UI.
+#      There is no REST or GraphQL endpoint for it. Until that one-time step is done this job fails
+#      with "Repository not found", which is why it says so explicitly below.
+#   2. `GITHUB_TOKEN` cannot push to a wiki — the wiki is a separate repository the automatic token
+#      has no scope for. `WIKI_TOKEN` must be a PAT with `repo` scope.
+
+name: wiki
+
+on:
+  push:
+    branches: [main]
+    paths: ['wiki/**']
+  workflow_dispatch:
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Refuse to publish internal references
+        run: |
+          if git grep -nIwE '[A-E][0-9]{1,3}' -- wiki; then
+            echo "::error::an internal finding identifier (e.g. D26) is in wiki/ — these name private review notes a consumer cannot resolve, and this job would publish them"
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN }}
+        run: |
+          if [ -z "$WIKI_TOKEN" ]; then
+            echo "::error::WIKI_TOKEN is not set. GITHUB_TOKEN cannot push to a wiki; add a PAT with 'repo' scope as the WIKI_TOKEN secret"
+            exit 1
+          fi
+
+          if ! git ls-remote "https://x-access-token:$WIKI_TOKEN@github.com/${{ github.repository }}.wiki.git" >/dev/null 2>&1; then
+            echo "::error::the wiki repository does not exist yet. Create the first page once at https://github.com/${{ github.repository }}/wiki — GitHub has no API for it — and re-run this job"
+            exit 1
+          fi
+
+          # Read and write are separate questions here and the read one is not the interesting one:
+          # a token that cannot write a wiki still clones it, so the check above passes and the push
+          # fails. Both causes have the same fix, so they share a message.
+          if ! git clone "https://x-access-token:$WIKI_TOKEN@github.com/${{ github.repository }}.wiki.git" published 2>clone.log; then
+            if grep -q 'Write access to repository not granted' clone.log; then
+              echo "::error::WIKI_TOKEN can read the wiki but not write it. A fine-grained PAT cannot write wikis at all; a classic PAT needs the full 'repo' scope. Replace the secret with a classic PAT with 'repo' and re-run"
+            else
+              cat clone.log
+            fi
+            exit 1
+          fi
+          # Delete first so a page removed from `wiki/` leaves the published wiki too; `.git` is the
+          # only thing that survives, and `find` rather than a glob so a future page starting with a
+          # dot is not silently kept.
+          find published -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+
+          # Copied as a tree rather than a flat glob. The pages are flat, because GitHub's wiki runs
+          # on Gollum and Gollum resolves a page by its basename — a subdirectory is not a route, so
+          # nesting them only produced links that 404. Grouping lives in `_Sidebar.md`, which is
+          # where Gollum renders a hierarchy. The tree walk stays because it costs nothing and is
+          # the shape that does not have to be revisited if that ever changes.
+          #
+          # The leading `# Heading` is dropped on the way. GitHub renders its own title above every
+          # wiki page, derived from the file's path, so an H1 in the file is always a second title
+          # under the first — which is what it looked like. The filenames are chosen so the derived
+          # title is the right one; the H1 stays in the repository, where nothing supplies a title
+          # and the file is read on its own.
+          ( cd wiki && find . -name '*.md' -print0 ) | while IFS= read -r -d '' page; do
+            mkdir -p "published/$(dirname "$page")"
+            awk 'NR == 1 && /^# / { next } NR <= 2 && /^[[:space:]]*$/ && !seen { next } { seen = 1; print }' \
+              "wiki/$page" > "published/$page"
+          done
+
+          cd published
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo 'wiki already matches the repository; nothing to publish'
+            exit 0
+          fi
+
+          git commit \
+            -m "Publish wiki from ${GITHUB_SHA:0:7}" \
+            -m "Mirrored from wiki/ in the repository, which is the source. Edits made here are overwritten by the next publish."
+          git push

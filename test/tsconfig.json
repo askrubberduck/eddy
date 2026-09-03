@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "noUnusedLocals": false,
+    "types": ["mocha", "node"]
+  },
+  "include": ["../src/**/*", "./**/*"],
+  "exclude": ["../node_modules", "../output", "./empty-registry"]
+}

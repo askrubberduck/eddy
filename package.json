@@ -1,0 +1,99 @@
+{
+  "name": "@askrubberduck/eddy",
+  "version": "0.3.0",
+  "description": "A domain-sliced state manager: declared actions, procedural commands, derived views that live in state, and named scopes. No redux, no zustand, no dependencies.",
+  "author": "askrubberduck",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/askrubberduck/eddy.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": false
+  },
+  "main": "output/index.js",
+  "types": "output/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./output/index.d.ts",
+      "default": "./output/index.js"
+    },
+    "./testing": {
+      "types": "./output/testing.d.ts",
+      "default": "./output/testing.js"
+    },
+    "./package.json": "./package.json",
+    "./react": {
+      "types": "./output/react.d.ts",
+      "default": "./output/react.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "output/**/*",
+    "react.js",
+    "react.d.ts",
+    "testing.js",
+    "testing.d.ts",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "state",
+    "state-management",
+    "domain",
+    "reducer",
+    "cqrs"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf output",
+    "prepare": "npm run build",
+    "check:format": "prettier --check .",
+    "check:wiki-anchors": "node scripts/check-wiki-anchors.mjs",
+    "check:types": "tsc -p test/tsconfig.json --noEmit && tsc -p test/empty-registry/tsconfig.json --noEmit",
+    "check:examples": "tsc -p examples/tsconfig.json --noEmit",
+    "check:example-runs": "tsx examples/shop/main.ts",
+    "check:artifact": "npm run build && node node_modules/typescript-consumer/bin/tsc -p scripts/artifact/tsconfig.json",
+    "format": "prettier --write .",
+    "pretest": "npm run check:types",
+    "test": "mocha",
+    "prepublishOnly": "npm run clean && npm run build",
+    "check:circular": "dpdm --no-warning --no-tree --exit-code circular:1 './src/**/*.ts'",
+    "check:bundler": "npm run build && node scripts/check-bundler.mjs"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "chai": "^6.2.2",
+    "dpdm": "^4.3.0",
+    "global-jsdom": "^29.0.0",
+    "jsdom": "^29.1.1",
+    "mocha": "^11.8.0",
+    "prettier": "^3.9.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.23.11",
+    "typescript": "^7.0.2",
+    "typescript-consumer": "npm:typescript@^5.4.5"
+  },
+  "peerDependencies": {
+    "react": ">=18 <20"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "overrides": {
+    "diff": "^8.0.3",
+    "serialize-javascript": "^7.1.0"
+  }
+}

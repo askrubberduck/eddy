@@ -1,0 +1,38 @@
+name: Release gate
+
+# The checks a release cannot publish without, kept in one file that ci.yml and release.yml both
+# call. A hand-copied second instance of these steps is the defect class this repository has already
+# shipped twice — most recently `wiki.yml` grepping a narrower bound than `ci.yml` did — so this
+# exists to be the one place they can go stale, not two.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # `check:examples` only type-checks. The shop example is the repository's one executable
+      # artifact and asserts nineteen contracts; nothing ran it, and it had never passed.
+      - run: npm run check:example-runs
+
+      # Every tsconfig in the repository excludes `output/`, and the only compiler otherwise in play
+      # is the devDependency — four majors above the floor a consumer actually needs. This compiles
+      # the published declarations at that floor, with skipLibCheck off.
+      - run: npm run check:artifact
+
+      # The peer range admits React 18 and 19; devDependencies pin 18, so 19 is otherwise unguarded
+      # and the range would be a claim nothing verifies.
+      - name: Test against the other supported React major
+        run: |
+          npm install --no-save react@19 react-dom@19 @types/react@19 @types/react-dom@19
+          npm test

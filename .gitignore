@@ -1,0 +1,16 @@
+# No trailing slash, so this matches a directory and a symlink alike. Campaign worktrees used to
+# link node_modules to the main checkout; they now run their own `npm install`. The convention cost
+# an install anyway the moment a packet ran `npm ci` — which follows the link, deletes the shared
+# tree, and takes the main checkout down with it. It did that twice.
+node_modules
+output/
+# Tool output, ignored globally on the author's machine and therefore invisible to git but visible
+# to Prettier, which reads this file and not the global one. That divergence made `check:format`
+# report 88 files locally against CI's 13.
+graphify-out/
+.codegraph/
+*.log
+.DS_Store
+.tsbuildinfo
+.worktrees/
+.omc/
