@@ -6,10 +6,16 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
-## Unreleased
+## 0.3.0 — 2026-09-10
 
-Nothing has been published yet. `0.3.0` exists as a manifest version and a tag has never been
-pushed, so there is no released history below this line and no consumer to have broken.
+The first published release. Everything below is what the package contains, not a delta from a
+version anyone could have installed — there is no earlier release to have broken. It is published to
+GitHub Packages under the `@askrubberduck` scope, so installing it needs a registry line for that
+scope and a GitHub token:
+
+```
+@askrubberduck:registry=https://npm.pkg.github.com
+```
 
 ### Added
 

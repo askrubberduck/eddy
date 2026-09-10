@@ -134,12 +134,20 @@ Two yeses and it earns its place. None and it is a heavier thing than you need.
 
 ## Install
 
+It is published to GitHub Packages, not to npm, so the `@askrubberduck` scope needs a registry line
+first — in `.npmrc` beside your `package.json`, or in `~/.npmrc`:
+
+```
+@askrubberduck:registry=https://npm.pkg.github.com
+```
+
 ```sh
 npm install @askrubberduck/eddy
 ```
 
-Not yet on npm: `0.3.0` is the manifest version, and no tag has been pushed. Until then,
-`npm install github:askrubberduck/eddy` builds it on the way in. Node 20 or later; TypeScript 5.4 or later for the declarations; React 18 or 19 only
+GitHub Packages authenticates every read, public package or not, so npm also needs a token with
+`read:packages` for that registry. `npm install github:askrubberduck/eddy` skips the registry
+entirely and builds it on the way in. Node 20 or later; TypeScript 5.4 or later for the declarations; React 18 or 19 only
 if you import `@askrubberduck/eddy/react`. The artifact is CommonJS with an `exports` map, and the
 two subpaths have fallbacks for resolvers that predate it, so a React Native application on an
 older Metro bundles it too.

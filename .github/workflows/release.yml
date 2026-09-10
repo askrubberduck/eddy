@@ -86,16 +86,18 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Required reviewers for this environment are set in the repository settings, not here.
-    environment: npm-publish
+    environment: github-packages
     permissions:
       contents: read
-      id-token: write # OIDC, for trusted publishing. Provenance stays off: `publishConfig.provenance` is false.
+      packages: write # The only credential this needs: GitHub Packages authenticates with GITHUB_TOKEN.
     steps:
-      # Trusted publishing requires npm 11.5.1 or newer.
+      # `registry-url` is what writes the auth file; without it `NODE_AUTH_TOKEN` reaches nothing. It
+      # is written outside the workspace, so this job publishes without a checkout, as it always has.
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+          registry-url: https://npm.pkg.github.com
+          scope: '@askrubberduck'
           package-manager-cache: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -115,3 +117,5 @@ jobs:
 
       # Suppress prepublishOnly: rebuilding here would delete the downloaded artifact.
       - run: npm publish --ignore-scripts "$(ls release/*.tgz)"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

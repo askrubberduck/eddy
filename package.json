@@ -9,8 +9,7 @@
     "url": "git+https://github.com/askrubberduck/eddy.git"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": false
+    "registry": "https://npm.pkg.github.com"
   },
   "main": "output/index.js",
   "types": "output/index.d.ts",
