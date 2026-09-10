@@ -174,8 +174,8 @@ contract and does not restate the others.
 | [Diagnostics](https://github.com/askrubberduck/eddy/wiki/Diagnostics) | The logger, the error reporter, and what never reaches either          |
 | [Design](https://github.com/askrubberduck/eddy/wiki/Design)           | The positions the library holds, and what it refuses to build          |
 
-`examples/shop` is a small shop that asserts twelve of these contracts by executing them.
-`npx tsx examples/shop/main.ts` runs it against the source.
+The repository ships a small shop that asserts twelve of these contracts by executing them, and
+`npm run check:example-runs` runs it against the source.
 
 ## Working on it
 
