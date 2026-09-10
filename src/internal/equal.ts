@@ -47,7 +47,7 @@ function structurally(a: any, b: any, pairs: Pairs): boolean {
   }
 
   if (proto === Array.prototype) {
-    return Array.isArray(a) && Array.isArray(b) && sameIndices(a, b, pairs)
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && sameOwnEnumerable(a, b, pairs)
   }
 
   if (proto === Object.prototype) {
@@ -70,26 +70,8 @@ export function sameDate(a: object, b: object): boolean {
   return isCleanDate(a) && isCleanDate(b) && Object.is(Date.prototype.getTime.call(a), Date.prototype.getTime.call(b))
 }
 
-function sameIndices(a: unknown[], b: unknown[], pairs: Pairs): boolean {
-  if (a.length !== b.length) {
-    return false
-  }
-  // Enumerating present indices avoids scanning billions of holes in a sparse array.
-  const indices = (value: unknown[]): string[] => Object.keys(value)
-  const aIndices = indices(a)
-  if (aIndices.length !== indices(b).length) {
-    return false
-  }
-  for (const index of aIndices) {
-    const at = index as unknown as number
-    if (!Object.hasOwn(b, index) || !equals(a[at], b[at], pairs)) {
-      return false
-    }
-  }
-  return true
-}
-
 function sameOwnEnumerable(a: any, b: any, pairs: Pairs): boolean {
+  // Enumerating present indices avoids scanning billions of holes in a sparse array.
   const keys = Object.keys(a)
   if (keys.length !== Object.keys(b).length) {
     return false

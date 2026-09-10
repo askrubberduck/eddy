@@ -5,8 +5,6 @@ import { checkState, inDevelopment, refusal } from './internal/state-value'
 // Entries are replaced, never mutated, so a copied cache remains a rollback snapshot.
 export type ViewCache = Map<string, { input: unknown; value: unknown }>
 
-export const createViewCache = (): ViewCache => new Map()
-
 // Captured at module load, before any selector exists: reading them off `Object` would let a
 // selector that replaces one answer the question about itself.
 const ownKeys = Reflect.ownKeys

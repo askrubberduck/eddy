@@ -97,6 +97,11 @@ describe('isEqual', () => {
       expect(isEqual(sparse(), sparse())).to.equal(true)
     })
 
+    it('checks length even when the present keys match', () => {
+      expect(isEqual([1], [1, ,])).to.equal(false)
+      expect(isEqual([1, ,], [1])).to.equal(false)
+    })
+
     it('survives a poisoned Array.prototype, which `in` would not', () => {
       Object.defineProperty(Array.prototype, 1, { value: undefined, configurable: true, writable: true })
       try {

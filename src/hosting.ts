@@ -13,7 +13,7 @@ import {
   refuseProtoKeyDeep,
 } from './internal/state-value'
 import type { LogLevel } from './types'
-import { assemble, createViewCache, resolveViews, type ViewCache } from './views'
+import { assemble, resolveViews, type ViewCache } from './views'
 
 // Domain definitions are copied at construction so later mutation cannot enter a live dispatch.
 export type Hosted = DomainState & {
@@ -404,7 +404,7 @@ export function hostDomains(
       on,
       effects,
       written,
-      cache: createViewCache(),
+      cache: new Map(),
       state: {},
     })
   }
