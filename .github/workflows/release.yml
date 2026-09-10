@@ -115,7 +115,10 @@ jobs:
             exit 1
           fi
 
+      # `./` is load-bearing, not tidiness: `release/askrubberduck-eddy-0.3.0.tgz` matches npm's
+      # `owner/repo` shorthand, so a bare relative path is resolved as a GitHub git dependency and
+      # the publish dies in `git ls-remote` having never touched a registry.
       # Suppress prepublishOnly: rebuilding here would delete the downloaded artifact.
-      - run: npm publish --ignore-scripts "$(ls release/*.tgz)"
+      - run: npm publish --ignore-scripts "$(ls ./release/*.tgz)"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
