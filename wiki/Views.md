@@ -78,8 +78,9 @@ republished. The consequence a reader can rely on: `scope.read('cart').total` is
 until the total actually changes, so a selector hook or a memo built on it stays quiet.
 
 A view depends on another by reading it, and the order they are declared in does not matter. A view
-that depends on itself, through however many siblings, is refused when the scope is created, not on
-first use.
+that depends on itself, through however many siblings, is refused when the scope is created if the
+seed exercises the cycle. A cycle only some state reaches — a view that reads a sibling only behind
+a flag — cannot be seen until that state exists, and the fold that first resolves it is refused.
 
 ## What the selector may not do
 

@@ -1,4 +1,4 @@
-import { consoleLogger, contain, defaultReporter, defaultSettings, validate } from './config'
+import { consoleLogger, contain, defaultReporter, defaultSettings, promiseThen, validate } from './config'
 import type { DomainDef, Teardown } from './domain'
 import { hostDomains, type DeclaredAction, type DeclaredCommand, type DomainState, type Hosted } from './hosting'
 import { parseAddress } from './internal/address'
@@ -36,7 +36,6 @@ import type {
 import { assemble, resolveViews } from './views'
 
 export class CommandAborted extends Error {
-  // The reason is optional; disposal supplies its own.
   constructor(address: string, reason = 'was superseded by a newer call') {
     super(`Command '${address}' ${reason}`)
     this.name = 'CommandAborted'
@@ -45,7 +44,8 @@ export class CommandAborted extends Error {
 
 /**
  * The cascade guard's abort. A class so a runaway fold is told from an application failure without a
- * regex over prose; `causes` is the chain, because the question is which addresses are in the loop.
+ * regex over prose. `causes` holds what emitted each of the last ten jobs — an action type, a
+ * watcher id, or `'emit'` — because the question is what keeps feeding the loop.
  */
 export class CascadeAborted extends Error {
   readonly scope: string
@@ -81,12 +81,12 @@ export type ScopeReport = {
   queueDepth: number
 
   /**
-   * Addresses of commands whose handlers have not settled. Addresses only, never inputs, and every
-   * unsettled command rather than only those declared `latest`.
+   * Addresses of command handlers that have started and not returned, one per handler, never inputs.
+   * A handler the scope cancelled stays here until it returns: its late failure is still reported.
    */
   inFlight: string[]
 
-  /** Invocations the scope still owns, including those with no live handler. */
+  /** Calls whose caller is still owed an outcome: queued, running, or waiting on the terminal fold. */
   live: number
 
   /** Drains the cascade guard aborted. A count, not a flag: one last week and a loop now differ. */
@@ -180,6 +180,10 @@ const stripUndefined = (options: object): Partial<Settings> => {
   return settings as Partial<Settings>
 }
 
+// The generation names which instance of an id an action was made for. It stays off the public
+// type: nothing outside the scope may compare it.
+type Dispatched = DispatchedAction & { readonly __generation?: number }
+
 type Draft = DomainState & {
   entry: Hosted
 
@@ -191,7 +195,7 @@ type Draft = DomainState & {
 export function createScope<const TDefs extends readonly DomainDef[]>(
   options: ScopeOptions<TDefs>,
 ): Scope<TDefs[number]['name'] & DomainName> {
-  const { domains, onAction } = options
+  const { domains } = options
 
   const name = options.name ?? `anonymous-${++anonymousCount}`
 
@@ -251,7 +255,11 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   // The action is narrowed here and only here. The reporter is the one channel handed a whole
   // action and the one a host wires off-process, so payloads holding credentials would otherwise
   // reach a remote sink. The shape refuses it rather than a warning about it.
-  const reportUnhandled = (error: unknown, action?: DispatchedAction): void => {
+  const reportUnhandled = (error: unknown, action?: Dispatched): void => {
+    if (disposed && interruptions.has(error as object)) {
+      return
+    }
+
     const reported: ReportedAction | undefined = action && {
       type: action.type,
       __seq: action.__seq,
@@ -280,8 +288,37 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     }
   }
 
+  let disposed = false
+
+  // The disposal boundary. Every host callback on the path from dispatch to publication — reducer,
+  // stage, selector, transform, watcher, effect, listener, subscriber, handler, `onAction` — enters
+  // through this, so none starts once the scope is disposed, wherever the dispose came from. The
+  // logger and the reporter stay outside: telling the host about the disposal is their job.
+  // Teardowns stay outside too, because disposal is what runs them.
+  // What a callback reached after disposal throws instead of running. A refusal, so a wrapper naming
+  // a failed read passes it through; never reported, because disposal is not a fault. Told apart by
+  // identity, never `instanceof`: a host may throw a Proxy whose prototype trap throws.
+  const interruptions = new WeakSet<object>()
+  const interrupted = () => {
+    const error = refusal(new CommandAborted(name, `was interrupted: scope '${name}' was disposed`))
+    interruptions.add(error)
+    return error
+  }
+
+  const guard = <T>(callback: T): T =>
+    (typeof callback !== 'function'
+      ? callback
+      : (...args: unknown[]) => {
+          if (disposed) {
+            throw interrupted()
+          }
+          return (callback as (...args: unknown[]) => unknown)(...args)
+        }) as T
+
+  const onAction = guard(options.onAction)
+
   // Marked as the library's, so a watcher source that builds a scope of its own is not re-wrapped.
-  const hosted = refusing(() => hostDomains(name, domains, options.preloadedState, log, logLevel))
+  const hosted = refusing(() => hostDomains(name, domains, options.preloadedState, log, logLevel, guard))
 
   // Build and validate the next root before publishing any per-domain candidate.
   const buildRoot = (candidates?: ReadonlyMap<Hosted, DomainState>): Record<string, unknown> => {
@@ -298,13 +335,11 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   freezeState(root)
 
   const listeners = new Set<() => void>()
-  const actionListeners = new Map<string, Set<(action: DispatchedAction) => void>>()
+  const actionListeners = new Map<string, Set<(action: Dispatched) => void>>()
   const watcherValues = new Map<string, unknown>()
 
   const watcherTeardowns = new Map<string, Teardown>()
-  let disposed = false
 
-  // The documented class for both, and the one the package exports.
   const refusedByDisposal = () => new CommandAborted(name, `was refused: scope '${name}' has been disposed`)
   const cancelledByDisposal = () => new CommandAborted(name, `was cancelled: scope '${name}' was disposed`)
 
@@ -322,7 +357,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     return () => undefined
   }
 
-  const notify = (action?: DispatchedAction) => {
+  const notify = (action?: Dispatched) => {
     // Snapshotting prevents unsubscribe-during-notification from skipping a neighbour.
     for (const listener of [...listeners]) {
       contain(listener, error => reportUnhandled(error, action))
@@ -332,45 +367,12 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   type FieldChanges = ReadonlyMap<string, ReadonlySet<string>>
 
   // Candidate keys are rechecked after every stage, so a later stage may restore a prior value.
-  const applyStage = (draft: Draft, stage: unknown, action: DispatchedAction): boolean => {
+  const applyStage = (draft: Draft, stage: unknown, action: Dispatched): boolean => {
     const entry = draft.entry
 
-    if (stage === undefined) {
-      return false
-    }
-
     // An instanced domain's written state is its live instances keyed by id, so a stage folds into
-    // one of them. The identity is on the action.
+    // one of them. `lands` has already checked that the action names a live one.
     const instanceId = entry.instanced ? action.__instance : undefined
-
-    if (entry.instanced && instanceId === undefined) {
-      throw new Error(
-        `Unable to fold '${action.type}' into domain '${entry.name}': it is instanced, so the action must name ` +
-          `an instance. Emit through the handle from scope.instance('${entry.name}', id)`,
-      )
-    }
-
-    // The instance may have been disposed mid-flight. Its terminal fold is dropped; the caller's
-    // promise still settles with the handler's real outcome.
-    if (instanceId !== undefined && !Object.hasOwn(draft.written, instanceId)) {
-      reportDropped(entry, 'gone', instanceId, action)
-      return false
-    }
-
-    // Liveness is not identity: the same string can name a later instance than the action's. Decided
-    // here rather than at emit, because every path reaches this point.
-    //
-    // Only for the action's own domain. A generation is minted by one domain's book and means
-    // nothing in another's, so comparing it across a neighbour `on` wire would drop a live
-    // instance's fold whenever an unrelated domain recycled the id. That wire matches by id alone.
-    if (
-      instanceId !== undefined &&
-      parseAddress(action.type)?.domain === entry.name &&
-      entry.instances.get(instanceId)?.generation !== action.__generation
-    ) {
-      reportDropped(entry, 'superseded', instanceId, action)
-      return false
-    }
 
     const target = instanceId === undefined ? draft.state : (draft.written[instanceId] as object)
 
@@ -456,7 +458,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   }
 
   // Re-resolve after each effective stage so the next stage reads updated derived state.
-  const materialise = (draft: Draft, action: DispatchedAction) => {
+  const materialise = (draft: Draft, action: Dispatched) => {
     const { name, views, state } = draft.entry
 
     try {
@@ -471,7 +473,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     }
   }
 
-  const stagesFor = (entry: Hosted, action: DispatchedAction, parsed: ParsedAddress | undefined): unknown[] => {
+  const stagesFor = (entry: Hosted, action: Dispatched, parsed: ParsedAddress | undefined): unknown[] => {
     const out: unknown[] = []
 
     if (parsed && parsed.domain === entry.name) {
@@ -500,11 +502,49 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
       out.push(wired.handler)
     }
 
-    return out
+    return out.filter(stage => stage !== undefined)
+  }
+
+  // Whether an action can fold into an instanced domain at all, decided once per fold so a dropped
+  // fold is reported once however many stages it carries. The caller's promise still settles with
+  // the handler's real outcome.
+  const lands = (entry: Hosted, action: Dispatched): boolean => {
+    const instanceId = action.__instance
+
+    if (instanceId === undefined) {
+      throw new Error(
+        `Unable to fold '${action.type}' into domain '${entry.name}': it is instanced, so the action must name ` +
+          `an instance. Emit through the handle from scope.instance('${entry.name}', id)`,
+      )
+    }
+
+    if (!Object.hasOwn(entry.written, instanceId)) {
+      reportDropped(entry, `an instance of domain '${entry.name}' is gone, so the fold was dropped`, action)
+      return false
+    }
+
+    // Liveness is not identity: the same string can name a later instance than the action's.
+    //
+    // Only for the action's own domain. A generation is minted by one domain's book and means
+    // nothing in another's, so comparing it across a neighbour `on` wire would drop a live
+    // instance's fold whenever an unrelated domain recycled the id. That wire matches by id alone.
+    if (
+      parseAddress(action.type)?.domain === entry.name &&
+      entry.instances.get(instanceId)?.generation !== action.__generation
+    ) {
+      reportDropped(
+        entry,
+        `an instance of domain '${entry.name}' was replaced before this fold, so it was dropped`,
+        action,
+      )
+      return false
+    }
+
+    return true
   }
 
   // Draft every affected domain before committing any of them.
-  const fold = (action: DispatchedAction, onCommitted?: () => void): FieldChanges => {
+  const fold = (action: Dispatched, onCommitted?: () => void): FieldChanges => {
     const drafts = new Map<Hosted, Draft>()
 
     const parsed = parseAddress(action.type)
@@ -517,7 +557,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
       }
 
       const stages = stagesFor(entry, action, parsed)
-      if (stages.length === 0) {
+      if (stages.length === 0 || (entry.instanced && !lands(entry, action))) {
         continue
       }
 
@@ -572,18 +612,61 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
       }
     }
 
+    // The commit point, after the last host callback of the draft: a scope disposed while drafting
+    // publishes nothing and decides nothing.
+    if (disposed) {
+      throw interrupted()
+    }
+
     if (committing.size === 0) {
       onCommitted?.()
       return changes
     }
 
-    commit(
-      committing,
-      changes,
-      () => {
-        onCommitted?.()
+    commit(committing, changes, onCommitted, action)
 
-        if (logLevel === 'debug') {
+    return changes
+  }
+
+  // The one place state becomes readable. Every caller derives its own candidates and hands them
+  // here; this owns the order and nothing else.
+  //
+  // The freeze is fallible — `Object.freeze` throws on an exotic object whose `preventExtensions`
+  // refuses — so it runs on a candidate root before anything is assigned, or a throw would publish
+  // the state while telling the caller it had failed.
+  //
+  // From the liveness check to the assignment and `decide`, no host code runs: building and freezing
+  // can reach a trap that disposes the scope, so the check comes after them, and every line the
+  // host hears about this fold — the trace, subscribers, watchers — comes after publication. `decide`
+  // is the library's own bookkeeping and must be done before the host hears anything, because what
+  // the host does next may be to dispose.
+  const commit = (
+    candidates: ReadonlyMap<Hosted, DomainState>,
+    changes: FieldChanges,
+    decide?: () => void,
+    action?: Dispatched,
+  ) => {
+    const next = buildRoot(candidates)
+
+    freezeState(next)
+
+    if (disposed) {
+      throw interrupted()
+    }
+
+    for (const [entry, candidate] of candidates) {
+      entry.written = candidate.written
+      entry.cache = candidate.cache
+      entry.state = candidate.state
+    }
+    root = next
+
+    decide?.()
+
+    // Published and decided: from here a host failure is reported, and never reaches the caller.
+    contain(
+      () => {
+        if (action && logLevel === 'debug') {
           log('debug', 'folded', {
             ...fromAction(name, action),
             // An instanced domain's changed keys are its instance ids, which an application sets to
@@ -594,43 +677,12 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
             ),
           })
         }
+
+        notify(action)
+        runWatchers(changes, action)
       },
-      action,
+      error => reportUnhandled(error, action),
     )
-
-    return changes
-  }
-
-  // The one place state becomes readable. Every caller derives its own candidates and hands them
-  // here; this owns the order and nothing else.
-  //
-  // The freeze is fallible — `Object.freeze` throws on an exotic object whose `preventExtensions`
-  // refuses — so it runs on a candidate root before anything is assigned, or a throw would publish
-  // the state while telling the caller it had failed. `freezeState`'s own rule still holds: a
-  // candidate arriving here has been decided, so nothing frozen belongs to a transaction that never
-  // published.
-  const commit = (
-    candidates: ReadonlyMap<Hosted, DomainState>,
-    changes: FieldChanges,
-    onCommitted?: () => void,
-    action?: DispatchedAction,
-  ) => {
-    const next = buildRoot(candidates)
-
-    freezeState(next)
-
-    // Terminal outcomes become certain here: after all fallible work, before publication.
-    onCommitted?.()
-
-    for (const [entry, candidate] of candidates) {
-      entry.written = candidate.written
-      entry.cache = candidate.cache
-      entry.state = candidate.state
-    }
-    root = next
-
-    notify(action)
-    runWatchers(changes, action)
   }
 
   // A watcher runs when its own domain moved **or** when a declared neighbour did. Without the
@@ -641,7 +693,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   const triggeredBy = (entry: Hosted, changes: FieldChanges): boolean =>
     changes.has(entry.name) || entry.uses.some(neighbour => changes.has(neighbour))
 
-  const runWatchers = (changes: FieldChanges, action?: DispatchedAction) => {
+  const runWatchers = (changes: FieldChanges, action?: Dispatched) => {
     for (const entry of hosted.values()) {
       if (!triggeredBy(entry, changes)) {
         continue
@@ -672,6 +724,11 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
           continue
         }
 
+        // The source or the equality read may have disposed the scope, which released these values.
+        if (disposed) {
+          return
+        }
+
         watcherValues.set(id, next)
 
         runTeardown(id, action)
@@ -693,13 +750,19 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     }
   }
 
-  const runEffects = (action: DispatchedAction, listeners: ReadonlyArray<(action: DispatchedAction) => void>) => {
+  const runEffects = (action: Dispatched, listeners: ReadonlyArray<(action: Dispatched) => void>) => {
     for (const entry of hosted.values()) {
       const wired = Object.hasOwn(entry.effects, action.type) ? entry.effects[action.type] : undefined
       if (!wired) {
         continue
       }
-      runEffect(() => wired.handler(action, reachFrom(entry.name) as never), action)
+
+      // Heard from one of its own instances, an effect reaches that instance as a command does.
+      const identity =
+        entry.instanced && action.__instance !== undefined && parseAddress(action.type)?.domain === entry.name
+          ? { id: action.__instance, generation: action.__generation }
+          : undefined
+      runEffect(() => wired.handler(action, reachFrom(entry.name, identity) as never), action)
     }
 
     for (const listener of listeners) {
@@ -711,10 +774,10 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     }
   }
 
-  const runEffect = (run: () => unknown, action?: DispatchedAction): unknown =>
+  const runEffect = (run: () => unknown, action?: Dispatched): unknown =>
     contain(run, error => reportUnhandled(error, action))
 
-  const runTeardown = (id: string, action?: DispatchedAction) => {
+  const runTeardown = (id: string, action?: Dispatched) => {
     const teardown = watcherTeardowns.get(id)
     if (!teardown) {
       return
@@ -730,13 +793,13 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   type Settled = { ok: true; result: unknown } | { ok: false; error: unknown }
 
   type ActionJob =
-    | { kind: 'reduce'; action: DispatchedAction; settle: Settlement; cause: string }
-    | { kind: 'called'; action: DispatchedAction; invocation: Invocation; cause: string }
-    | { kind: 'terminal'; action: DispatchedAction; invocation: Invocation; outcome: Settled; cause: string }
+    | { kind: 'reduce'; action: Dispatched; settle: Settlement; cause: string }
+    | { kind: 'called'; action: Dispatched; invocation: Invocation; cause: string }
+    | { kind: 'terminal'; action: Dispatched; invocation: Invocation; outcome: Settled; cause: string }
 
-  // ponytail: fixed global guard; make configurable only if legitimate cascades approach it.
-  // Not `10_000`: a numeric separator survives an ES2022 emit and metro 0.72's minifier cannot
-  // parse it. `check:bundler` pins this and the `??=` in `internal/version.ts`.
+  // Fixed, not a setting, until a legitimate cascade comes near it. Not `10_000`: a numeric
+  // separator survives an ES2022 emit and metro 0.72's minifier cannot parse it. `check:bundler`
+  // pins it.
   const CASCADE_LIMIT = 10000
 
   const queue: ActionJob[] = []
@@ -775,11 +838,10 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   const dropQueue = (error: unknown) => {
     const dropped = queue.splice(0, queue.length)
     for (const job of dropped) {
-      if (job.kind === 'reduce') {
-        job.settle.reject(error)
-      } else {
-        cancelInvocation(job.invocation, error)
-      }
+      contain(
+        () => (job.kind === 'reduce' ? job.settle.reject(error) : cancelInvocation(job.invocation, error)),
+        failure => reportUnhandled(failure),
+      )
     }
   }
 
@@ -857,7 +919,8 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
       return
     }
 
-    // Captured before folding: subscribers may dispose and clear registrations.
+    // Captured before folding, so a listener registered by this action's own reactions first hears
+    // the next one.
     const reactionListeners = [...(actionListeners.get(action.type) ?? []), ...(actionListeners.get(WILDCARD) ?? [])]
 
     const markDecided = () => {
@@ -869,6 +932,16 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     try {
       fold(action, markDecided)
     } catch (error) {
+      // Whatever the draft threw, a disposed scope refuses the action as an unstarted one is refused.
+      if (disposed) {
+        if (job.kind === 'reduce') {
+          job.settle.reject(refusedByDisposal())
+        } else {
+          cancelInvocation(job.invocation, cancelledByDisposal())
+        }
+        return
+      }
+
       if (logLevel !== 'silent') {
         log('info', 'rejected', fromAction(name, action))
       }
@@ -960,6 +1033,8 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
 
   const live = new Set<Invocation>()
 
+  const running = new Set<Invocation>()
+
   const settleInvocation = (invocation: Invocation, outcome: Settled) => {
     if (invocation.settled) {
       return
@@ -980,12 +1055,24 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
       return
     }
     invocation.tombstoned = true
-
-    // Scope-initiated cancellation is control flow, not an unhandled rejection.
-    invocation.promise.catch(() => undefined)
-    settleInvocation(invocation, { ok: false, error })
     invocation.cancelledWith = error
-    invocation.controller.abort(error)
+
+    // Settled through the library's own resolver first: the caller's promise is public, and its
+    // holder may have redefined `then` or `constructor` on it.
+    settleInvocation(invocation, { ok: false, error })
+
+    // Scope-initiated cancellation is control flow, not an unhandled rejection. Marking the promise
+    // handled reads its `constructor`, so a poisoned one is left to reject as the platform decides.
+    try {
+      promiseThen.call(invocation.promise, undefined, () => undefined)
+    } catch {
+      // The caller broke the promise it was handed; it has still been rejected.
+    }
+
+    contain(
+      () => invocation.controller.abort(error),
+      failure => reportUnhandled(failure),
+    )
   }
 
   // A newer invocation may already own the slot, in which case this one holds nothing to release.
@@ -1001,16 +1088,22 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     // The pump must not await handlers: a handler may await an action it emits into this queue.
     const ctx = makeCtx(invocation.domainName, local.signal, invocation.version, invocation.identity)
 
-    let handled: Promise<unknown>
-    try {
-      handled = Promise.resolve(invocation.entry.handler(invocation.input, ctx))
-    } catch (error) {
-      handled = Promise.reject(error)
+    running.add(invocation)
+
+    // A promise of the library's own, resolved with whatever the handler returned or threw. Not
+    // `Promise.resolve`, which hands a native promise back as it is, own `then` included: resolving
+    // a fresh one reads `then` inside the resolver, where a throw becomes this call's failure.
+    const handled = new Promise(resolve => resolve(invocation.entry.handler(invocation.input, ctx)))
+
+    const finish = (outcome: Settled) => {
+      running.delete(invocation)
+      finishHandler(invocation, outcome)
     }
 
-    void handled.then(
-      result => finishHandler(invocation, { ok: true, result }),
-      (error: unknown) => finishHandler(invocation, { ok: false, error }),
+    void promiseThen.call(
+      handled,
+      result => finish({ ok: true, result }),
+      (error: unknown) => finish({ ok: false, error }),
     )
   }
 
@@ -1166,29 +1259,9 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     }
   }
 
-  // A fold aimed at an instance that has gone. Once per instance on the ungated channel, or a
-  // command whose terminal stages all land after disposal says it three times.
-  //
-  // Two distinct drops: the instance is gone, or it is alive and is not the one the action was made
-  // for. They dedupe apart, so a superseded fold on a live id cannot silence a later stranding.
-  const reportDropped = (entry: Hosted, kind: 'gone' | 'superseded', instanceId: string, action: DispatchedAction) => {
-    const key = `${kind}:${instanceId}`
-    if (entry.reportedOrphans.has(key)) {
-      return
-    }
-
-    const reported = log('error', 'rejected', {
-      scope: name,
-      type: action.type,
-      cause:
-        kind === 'gone'
-          ? `an instance of domain '${entry.name}' is gone, so the fold was dropped`
-          : `an instance of domain '${entry.name}' was replaced before this fold, so it was dropped`,
-    })
-
-    if (reported) {
-      entry.reportedOrphans.add(key)
-    }
+  // On the ungated channel. The id stays out: it is application data.
+  const reportDropped = (entry: Hosted, cause: string, action: Dispatched) => {
+    log('error', 'rejected', { scope: name, type: action.type, cause })
   }
 
   const readState = (domain: string) => {
@@ -1244,11 +1317,11 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     return descriptor
   }
 
-  const listen = (address: string, handler: (action: DispatchedAction) => void): (() => void) => {
+  const listen = (address: string, handler: (action: Dispatched) => void): (() => void) => {
     const set = actionListeners.get(address) ?? new Set()
 
     // Independent registrations of the same function need independent lifetimes.
-    const registration = (action: DispatchedAction) => handler(action)
+    const registration = guard((action: Dispatched) => handler(action))
     set.add(registration)
     actionListeners.set(address, set)
     return () => {
@@ -1387,6 +1460,10 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
 
   const instanceChange = (entry: Hosted): FieldChanges => new Map([[entry.name, new Set<string>()]])
 
+  // Scope-wide rather than per id, so a book can leave with its instance and a stale handle still
+  // never matches a later instance under the same id. Zero is a preloaded instance's.
+  let generations = 0
+
   const acquireInstance = (
     entry: Hosted,
     id: string,
@@ -1394,9 +1471,10 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
   ): InstanceHandle<never, never> => {
     const book = entry.instances.get(id) ?? { owners: 0, generation: 0 }
 
-    // Claim before publication: a subscriber may synchronously take and release the same id, and
-    // must not remove the instance from under the handle whose arrival notified it. Handed to
-    // `commit` rather than run here, so an arrival that never publishes claims no owner either.
+    // Claimed before any subscriber hears of the arrival: a subscriber may synchronously take and
+    // release the same id, and must not remove the instance from under the handle whose arrival
+    // notified it. Handed to `commit` rather than run here, so an arrival that never publishes
+    // claims no owner either.
     const claim = () => {
       book.owners += 1
       entry.instances.set(id, book)
@@ -1409,8 +1487,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
 
       commit(instanceCandidate(entry, written), instanceChange(entry), () => {
         claim()
-        book.generation += 1
-        entry.reportedOrphans.delete(id)
+        book.generation = ++generations
       })
     }
 
@@ -1454,9 +1531,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
           return
         }
 
-        // The generation outlives the instance: deleting it restarts the count and lets a stale
-        // handle match its replacement.
-        const departed = () => entry.instances.set(id, { owners: 0, generation })
+        const departed = () => entry.instances.delete(id)
 
         if (!Object.hasOwn(entry.written, id)) {
           departed()
@@ -1509,7 +1584,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
       }
       return written
     },
-    on: (descriptor: unknown, handler: (action: DispatchedAction) => void) => {
+    on: (descriptor: unknown, handler: (action: Dispatched) => void) => {
       const descriptors = Array.isArray(descriptor) ? (descriptor as unknown[]) : [descriptor]
 
       // Every decision below reads this one answer. `length` is not a fact: a `Proxy` answers each
@@ -1551,27 +1626,21 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
         return refuseRegistration('subscribe')
       }
 
-      const registration = () => listener()
+      const registration = guard(() => listener())
       listeners.add(registration)
       return () => {
         listeners.delete(registration)
       }
     },
     // Materialised, never an iterator: an iterator would read the live set at whatever instant the
-    // caller consumed it. Guarded on `disposed` rather than on the collections being empty:
-    // `dispose` clears them in stages, and a listener firing mid-teardown reads a half-torn scope.
-    inspect: (): ScopeReport => {
-      if (disposed) {
-        return { queueDepth: 0, inFlight: [], live: 0, cascades: { count: cascadeCount, lastCause: cascadeLastCause } }
-      }
-
-      return {
-        queueDepth: queue.length,
-        inFlight: [...live].map(invocation => invocation.address),
-        live: live.size,
-        cascades: { count: cascadeCount, lastCause: cascadeLastCause },
-      }
-    },
+    // caller consumed it. The queue and `live` are guarded on `disposed` rather than read: `dispose`
+    // empties them in stages, and an abort listener firing mid-teardown would read a half-torn scope.
+    inspect: (): ScopeReport => ({
+      queueDepth: disposed ? 0 : queue.length,
+      inFlight: [...running].map(invocation => invocation.address),
+      live: disposed ? 0 : live.size,
+      cascades: { count: cascadeCount, lastCause: cascadeLastCause },
+    }),
 
     instance: (domain: string, id: string) => acquireInstance(instanceEntry(domain, id), id),
 
@@ -1642,15 +1711,19 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
         log('info', 'disposed', { scope: name })
       }
 
+      // Every obligation that can reach host code is contained on its own, so each completes
+      // whatever the others throw, and a second dispose has nothing left to finish.
       dropQueue(refusedByDisposal())
 
       // Preserve a terminal result committed before disposal interrupted its reactions.
       for (const invocation of [...live]) {
-        if (invocation.decided) {
-          settleInvocation(invocation, invocation.decided)
-        } else {
-          cancelInvocation(invocation, cancelledByDisposal())
-        }
+        contain(
+          () =>
+            invocation.decided
+              ? settleInvocation(invocation, invocation.decided)
+              : cancelInvocation(invocation, cancelledByDisposal()),
+          error => reportUnhandled(error),
+        )
       }
 
       listeners.clear()
@@ -1672,8 +1745,7 @@ export function createScope<const TDefs extends readonly DomainDef[]>(
     for (const [key, watcher] of Object.entries(entry.watchers)) {
       const id = `${entry.name}.${key}`
 
-      // The last step of construction is the one that threw raw, with no scope name identifying it
-      // as ours.
+      // Wrapped so a throwing source names the scope it failed to build.
       const seeded = readingWatcher(id, () => watcher.source(entry.state as never, reachFrom(entry.name).read as never))
       readingWatcher(id, () => {
         checkState(seeded, `the value watched by '${id}'`)

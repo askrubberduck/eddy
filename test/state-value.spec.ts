@@ -701,7 +701,7 @@ try {
       expect(lines[0], 'production no longer inspects a value seed at all').to.equal('SEEDED')
     })
 
-    it('carries into production the own keys the clone used to strip', function () {
+    it('carries its own keys into production', function () {
       this.timeout(60000)
       const lines = buildModeProbe(
         `

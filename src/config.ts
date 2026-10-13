@@ -1,3 +1,4 @@
+import { describeValue } from './internal/state-value'
 import type { LogLevel, Logger, Settings } from './types'
 
 export const consoleLogger: Logger = {
@@ -20,22 +21,11 @@ export const defaultReporter =
 
 const LEVELS: readonly LogLevel[] = ['silent', 'info', 'debug']
 
-// Not `describeValue` from internal/state-value: that names what a *state* value is and answers
-// "a plain object from another realm" for a bare `{}`. Here the only fact is what was expected.
-const describe = (value: unknown): string =>
-  value === null
-    ? 'null'
-    : Array.isArray(value)
-      ? 'an array'
-      : typeof value === 'object'
-        ? 'an object'
-        : `a ${typeof value}`
-
 // Refused whole, never field by field: a scope with half-valid settings is worse than one that
 // never opened.
 export function validate(settings: Partial<Settings>, subject: string): void {
   if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
-    throw new TypeError(`${subject}: settings must be an object, but ${describe(settings)} arrived`)
+    throw new TypeError(`${subject}: settings must be an object, but ${describeValue(settings)} arrived`)
   }
 
   if ('logger' in settings) {
@@ -61,10 +51,13 @@ export function validate(settings: Partial<Settings>, subject: string): void {
 
   if ('onUnhandledError' in settings && typeof settings.onUnhandledError !== 'function') {
     throw new TypeError(
-      `${subject}: 'onUnhandledError' must be a function, but ${describe(settings.onUnhandledError)} arrived`,
+      `${subject}: 'onUnhandledError' must be a function, but ${describeValue(settings.onUnhandledError)} arrived`,
     )
   }
 }
+
+// Captured at load, so a promise's own `then`, which its holder can redefine, is never the one called.
+export const promiseThen = Promise.prototype.then
 
 // A genuine promise, never a thenable: reading `.then` off host data invokes an application field
 // as a function, and an accessor-backed one runs on the read alone.
@@ -80,9 +73,9 @@ function route(outcome: unknown, onFailure: (error: unknown) => void): void {
   }
 
   try {
-    Promise.prototype.then.call(outcome as Promise<unknown>, undefined, onFailure)
+    promiseThen.call(outcome as Promise<unknown>, undefined, onFailure)
   } catch {
-    // Branded but not a promise. There is no outcome to observe, and nothing was invoked on it.
+    // Branded but not a promise, or a promise whose `constructor` throws. Nothing to observe.
   }
 }
 

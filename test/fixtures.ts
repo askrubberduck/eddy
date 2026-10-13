@@ -48,7 +48,6 @@ declare module '../src/types' {
   interface Domains {
     cart: DomainType<CartState, CartActions, CartViews, 'session'>
     session: DomainType<SessionState, SessionActions>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     audit: DomainType<AuditState, AuditActions, {}, 'cart' | 'session'>
     upload: DomainType<UploadState, UploadActions>
     draft: DomainType<DraftState, DraftActions, {}, 'session', true>

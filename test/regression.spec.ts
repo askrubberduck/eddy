@@ -42,16 +42,13 @@ declare module '../src/types' {
     leak: DomainType<LeakState, LeakActions, LeakViews>
     snap: DomainType<SnapState, SnapActions>
     chainA: DomainType<ChainAState, ChainAActions>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     chainB: DomainType<ChainBState, ChainBActions, {}, 'chainA'>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     chainC: DomainType<ChainCState, ChainCActions, {}, 'chainA'>
     pulse: DomainType<PulseState, PulseActions>
     staged: DomainType<StagedState, StagedActions>
     bounce: DomainType<BounceState, BounceActions, BounceViews>
     carry: DomainType<CarryState, CarryActions>
     brittle: DomainType<BrittleState, BrittleActions>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     eaves: DomainType<EavesState, EavesActions, {}, 'carry'>
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@askrubberduck/eddy",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A domain-sliced state manager: declared actions, procedural commands, derived views that live in state, and named scopes. No redux, no zustand, no dependencies.",
   "author": "askrubberduck",
   "license": "MIT",

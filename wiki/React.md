@@ -5,8 +5,6 @@ five hooks bound to that scope by default and to whatever a `ScopeProvider` abov
 supplies instead. It subscribes through `useSyncExternalStore`, so a component renders when the
 state it read moves and not otherwise, in React 18 and React 19.
 
-<!-- fence: skip the import alone; the example below imports it -->
-
 ```ts
 import { createScopeHooks } from '@askrubberduck/eddy/react'
 ```
@@ -18,7 +16,7 @@ A cart, a per-mount quick-add panel, and a preview scope beside the real one.
 ```tsx
 import { useEffect, useState } from 'react'
 import { createScope, defineDomain, reduce, view } from '@askrubberduck/eddy'
-import type { DomainType, Reduce } from '@askrubberduck/eddy'
+import type { DomainType, Reduce, Scope } from '@askrubberduck/eddy'
 import { createScopeHooks } from '@askrubberduck/eddy/react'
 
 type CartState = { lines: { sku: string; qty: number }[] }
@@ -88,8 +86,12 @@ function QuickAdd() {
 }
 
 export function App() {
-  const [preview] = useState(() => createScope({ name: 'preview', domains: [cart, quickAdd] }))
-  useEffect(() => () => preview.dispose(), [preview])
+  const [preview, setPreview] = useState<Scope<'cart' | 'quickAdd'>>()
+  useEffect(() => {
+    const created = createScope({ name: 'preview', domains: [cart, quickAdd] })
+    setPreview(created)
+    return () => created.dispose()
+  }, [])
 
   const { name } = useScope()
   const lines = useDomain('cart').lines
@@ -104,9 +106,11 @@ export function App() {
           <li key={line.sku}>{line.sku}</li>
         ))}
       </ul>
-      <ScopeProvider scope={preview}>
-        <Count />
-      </ScopeProvider>
+      {preview && (
+        <ScopeProvider scope={preview}>
+          <Count />
+        </ScopeProvider>
+      )}
     </>
   )
 }
@@ -154,7 +158,9 @@ the same transaction as everything else; the [Instances](Instances) page is the 
 
 The hooks read the scope passed to `createScopeHooks` unless a `ScopeProvider` above the component
 supplies another. That is how a preview, a wizard or a request gets its own state without a second
-set of hooks. The component that creates the scope disposes it.
+set of hooks. The component that creates the scope disposes it, and creates it in the same effect
+that disposes it: StrictMode runs every effect, cleans it up and runs it again, so a scope made
+during render and disposed in cleanup would be disposed for the rest of its life.
 
 ## Server rendering
 

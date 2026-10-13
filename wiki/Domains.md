@@ -92,7 +92,8 @@ first emit.
 ## The seed
 
 `state` is the first value of the domain, as a plain object or as a function that builds one. A
-value seed is copied for every scope; a factory is called for every scope and must build a fresh
+value seed is copied for every scope at the top level, and a development build freezes the nested
+values it shares between them, the author's own objects included; a factory is called for every scope and must build a fresh
 object each time, because a factory that returns the same root twice would hand two scopes one
 state, and a development build refuses it by name. What the seed may contain is the
 [State](State) contract.
@@ -103,8 +104,6 @@ The second argument names the neighbours this domain may read from, emit into, f
 `on`, and react to through `effects`. It types four things: `ctx.read` and `ctx.emit` inside a
 command, the addresses `on` and `effects` may be keyed by, and the `read` a watcher's source
 receives. A domain reaching past its list does not compile:
-
-<!-- fence: expect-error -->
 
 ```ts
 defineDomain('profile', ['session'], {
@@ -123,10 +122,10 @@ has no refusal that is not a lie; both are reported on the error channel, once p
 neighbour named in `uses` that the scope does not host fails `createScope` outright, in whatever
 order the domains were listed. Two domains may name each other. Nothing is sorted.
 
-The `on` and `effects` maps are not checked against `uses`. A wire to an action a _declared_
-neighbour does not have is a typo about something you believe exists, and `createScope` throws.
-A wire into a domain the scope does not host at all may be a blueprint hosted in a smaller scope,
-so it is dropped, logged on the error channel, and the scope builds.
+The `on` and `effects` maps are not checked against `uses`. A wire to an address a hosted domain —
+the domain's own, or any neighbour — does not answer is a typo about something that exists, and
+`createScope` throws. A wire into a domain the scope does not host at all may be a blueprint hosted
+in a smaller scope, so it is dropped, logged on the error channel, and the scope builds.
 
 ## What a declaration refuses
 

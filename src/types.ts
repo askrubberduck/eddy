@@ -26,7 +26,6 @@ export type StateValue =
 export type DomainType<
   TState,
   TActions extends ActionsShape,
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TViews = {},
   TUses extends DomainName = never,
   // Whether this domain is held per instance. When it is, `TState` is what **one** instance holds;
@@ -34,7 +33,6 @@ export type DomainType<
   TInstanced extends boolean = false,
 > = { state: TState; actions: TActions; views: TViews; uses: TUses; instanced: TInstanced }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface Domains {}
 
 type Registered = keyof Domains & string
@@ -115,10 +113,7 @@ export type WrittenOf<D extends DomainName> =
 
 export type ActionsOf<D extends DomainName> = Domains[D & keyof Domains] extends { actions: infer A } ? A : never
 
-export type ViewsOf<D extends DomainName> = Domains[D & keyof Domains] extends { views: infer V }
-  ? V
-  : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-    {}
+export type ViewsOf<D extends DomainName> = Domains[D & keyof Domains] extends { views: infer V } ? V : {}
 
 export type UsesOf<D extends DomainName> = Domains[D & keyof Domains] extends { uses: infer U } ? U : never
 
@@ -219,9 +214,6 @@ export type EffectCtx<TReach extends DomainName> = {
 export type DispatchedAction = {
   readonly type: string
   readonly __instance?: string
-
-  /** Which instance of that id: the one this action was made for, not whichever wears the name at fold time. */
-  readonly __generation?: number
   readonly input?: unknown
   readonly result?: unknown
   readonly error?: unknown

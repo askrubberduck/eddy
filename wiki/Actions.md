@@ -195,7 +195,8 @@ scopes never issue the same number.
 
 A reaction that emits an action which triggers the reaction again is a loop, and it is bounded: a
 single dispatch may drain ten thousand actions, and the one after that is refused with
-`CascadeAborted`, which names the last ten addresses in the chain. Everything still queued is
+`CascadeAborted`, whose `causes` name what emitted each of the last ten: the action whose reactions
+emitted it, the watcher that did, or `emit` from outside a dispatch. Everything still queued is
 rejected, the error is reported, and the scope stays usable. `scope.inspect().cascades` counts how
 often it happened.
 

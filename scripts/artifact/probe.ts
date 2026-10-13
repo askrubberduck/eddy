@@ -20,7 +20,6 @@ type DraftActions = { type: Reduce<string> }
 declare module '../../output/index' {
   interface Domains {
     cart: DomainType<CartState, CartActions, CartViews>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     draft: DomainType<DraftState, DraftActions, {}, never, true>
   }
 }

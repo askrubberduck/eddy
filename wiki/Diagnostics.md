@@ -1,9 +1,10 @@
 # Diagnostics
 
 A scope has two channels out: a logger that traces what it does, and a reporter that hears about
-failures nobody else can. Both are settings of the scope, both are validated before the scope
-exists, and neither is ever handed an input, a result or an error payload, because a diagnostic
-sink is the one place where a payload leaves the process.
+failures nobody else can. Both are settings of the scope and both are validated before the scope
+exists. The trace never carries an input, a result or an error, because a diagnostic sink is the
+one place where a payload leaves the process. The reporter is handed the error itself — that is
+what it is for — and the action narrowed to its type and sequence numbers.
 
 ## The example on this page
 
@@ -57,7 +58,7 @@ level gates the first two: `'silent'`, the default, traces nothing; `'info'` add
 rejection, a supersession and a disposal; `'debug'` adds the trace of every dispatch. The `error` channel is
 never gated, because a silent trace must not become a silent failure.
 
-Every line is `eddy: <event>` followed by one record. The record carries the scope's name, the
+Every trace line is `eddy: <event>` followed by one record. The record carries the scope's name, the
 action's type and sequence numbers, sometimes an address or a cause, and for a fold the names of
 the fields that moved per domain. It never carries an input, a result, an error, or an instance id,
 which an application may have set to a token.
@@ -104,7 +105,7 @@ failures[0]?.action?.type // 'clock.tick'
 ```
 
 The default reporter is `logger.error('eddy: unhandled error', type, error)` on the scope's own
-logger. A reporter that throws is itself contained, and the original error goes to `console.error`
+logger — the one line on the logger that carries an error object, stack included. A reporter that throws is itself contained, and the original error goes to `console.error`
 rather than back through the logger it probably arrived with.
 
 ## What reaches neither

@@ -76,7 +76,6 @@ declare module '../src/types' {
     chain: DomainType<ChainState, ChainActions>
     boom: DomainType<BoomState, BoomActions>
     step: DomainType<StepState, StepActions>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     mirror: DomainType<MirrorState, MirrorActions, {}, 'step'>
     twoWatch: DomainType<TwoWatchState, TwoWatchActions>
     spin: DomainType<SpinState, SpinActions>
@@ -296,7 +295,7 @@ describe('the dispatch queue', () => {
     strandedQueued = undefined
   })
 
-  describe('item 7 — superseded during its own called action', () => {
+  describe('superseded during its own called action', () => {
     it('never starts the handler of a call superseded by its own called-stage listener', async () => {
       const scope = createTestScope({ domains: [race] })
 
@@ -322,7 +321,7 @@ describe('the dispatch queue', () => {
     })
   })
 
-  describe('item 1 — a superseded running handler that never settles', () => {
+  describe('a superseded running handler that never settles', () => {
     it('rejects the superseded promise itself rather than waiting for the handler', async () => {
       const scope = createScope({ domains: [hang] })
 
@@ -349,7 +348,7 @@ describe('the dispatch queue', () => {
     })
   })
 
-  describe('item 2 — the replacement is published before the previous one is aborted', () => {
+  describe('the replacement is published before the previous one is aborted', () => {
     it('leaves the newest call as latest when the previous one re-emits from its abort listener', async () => {
       const scope = createTestScope({ domains: [race] })
 
@@ -378,7 +377,7 @@ describe('the dispatch queue', () => {
     })
   })
 
-  describe('item 4 — a version is allocated and enqueued indivisibly', () => {
+  describe('a version is allocated and enqueued indivisibly', () => {
     it('stamps versions in queue order, including across a synchronous abort', async () => {
       const scope = createTestScope({ domains: [race] })
       current = scope as never
@@ -502,7 +501,7 @@ describe('the dispatch queue', () => {
       expect(String((cascade as Error).message)).to.match(/osc\.seen/)
     })
 
-    it('settles a queued action rather than stranding it when both an effect and the reporter throw (gate finding 4)', async () => {
+    it('settles a queued action rather than stranding it when both an effect and the reporter throw', async () => {
       const scope = createScope({
         domains: [stranded],
         onUnhandledError: () => {
@@ -519,6 +518,45 @@ describe('the dispatch queue', () => {
   })
 
   describe('commands on the queue', () => {
+    it('rejects the emit with a throwing called stage, and never starts the handler', async () => {
+      let started = 0
+      const guarded = defineDomain('guarded' as never, [], {
+        state: { n: 0 },
+        actions: {
+          go: cmd(
+            (async () => {
+              started += 1
+              return 1
+            }) as never,
+            {
+              called: () => {
+                throw new Error('called stage exploded')
+              },
+            } as never,
+          ),
+        },
+      })
+      const scope = createScope({ domains: [guarded] as never }) as never as Scope<never>
+
+      await rejects((scope.emit as (a: string) => Promise<unknown>)('guarded.go'), /called stage exploded/)
+      await flush()
+
+      expect(started).to.equal(0)
+      expect(scope.inspect().live).to.equal(0)
+    })
+
+    it("hands the handler the called action's sequence number as ctx.version", async () => {
+      const versioned = defineDomain('versioned' as never, [], {
+        state: { n: 0 },
+        actions: { go: cmd((async (_input: unknown, ctx: { version: number }) => ctx.version) as never) },
+      })
+      const scope = createTestScope({ domains: [versioned] as never })
+
+      const version = await (scope.emit as (a: string) => Promise<unknown>)('versioned.go')
+
+      expect(version).to.equal(scope.actions()[0].__seq)
+    })
+
     it('resolves the caller with the handler result when a done stage throws, and reports the stage', async () => {
       const reported: unknown[] = []
       const scope = createTestScope({ domains: [outcome], onUnhandledError: error => reported.push(error) })
@@ -572,7 +610,7 @@ describe('the dispatch queue', () => {
       expect(((await settlement(first)) as { error: unknown }).error).to.be.instanceOf(CommandAborted)
     })
 
-    it('keeps the first cancellation reason when disposal follows supersession (item 3)', async () => {
+    it('keeps the first cancellation reason when disposal follows supersession', async () => {
       const scope = createScope({ domains: [hang] })
 
       const first = scope.emit('hang.hang')

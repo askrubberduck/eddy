@@ -89,19 +89,19 @@ describe('disposal — delivery', () => {
     disposeFromEffect = false
   })
 
-  it('a dispose() from a domain effect still delivers the rest of the action', async () => {
+  it('a dispose() from a domain effect stops the listeners after it', async () => {
     disposeFromEffect = true
     const scope = createScope({ domains: [live] })
     current = scope
     scope.on('live.go', () => log.push('listener-1'))
-    scope.on('live.go', () => log.push('listener-2'))
+    scope.on('*', () => log.push('wildcard'))
 
     await scope.emit('live.go').catch(() => undefined)
 
-    expect(log).to.deep.equal(['domain-effect', 'listener-1', 'listener-2'])
+    expect(log).to.deep.equal(['domain-effect'])
   })
 
-  it('a dispose() from a listener still delivers the listeners after it', async () => {
+  it('a dispose() from a listener stops the listeners after it', async () => {
     const scope = createScope({ domains: [live] })
     current = scope
     scope.on('live.go', () => {
@@ -109,49 +109,35 @@ describe('disposal — delivery', () => {
       scope.dispose()
     })
     scope.on('live.go', () => log.push('listener-2'))
+    scope.on('*', () => log.push('wildcard'))
 
     await scope.emit('live.go').catch(() => undefined)
 
-    expect(log).to.deep.equal(['domain-effect', 'listener-1', 'listener-2'])
+    expect(log).to.deep.equal(['domain-effect', 'listener-1'])
   })
 
-  it('delivers identically whichever kind of reaction disposed the scope', async () => {
-    const fromEffect: string[] = []
-    disposeFromEffect = true
-    let scope = createScope({ domains: [live] })
+  it('a dispose() from a subscriber stops the subscribers after it', async () => {
+    const scope = createScope({ domains: [live] })
     current = scope
-    scope.on('live.go', () => fromEffect.push('listener-1'))
-    scope.on('live.go', () => fromEffect.push('listener-2'))
-    await scope.emit('live.go').catch(() => undefined)
-
-    const fromListener: string[] = []
-    disposeFromEffect = false
-    scope = createScope({ domains: [live] })
-    current = scope
-    scope.on('live.go', () => {
-      fromListener.push('listener-1')
+    scope.subscribe(() => {
+      log.push('subscriber-1')
       scope.dispose()
     })
-    scope.on('live.go', () => fromListener.push('listener-2'))
-    await scope.emit('live.go').catch(() => undefined)
+    scope.subscribe(() => log.push('subscriber-2'))
+    scope.on('live.go', () => log.push('listener'))
 
-    const fromSubscriber: string[] = []
-    disposeFromEffect = false
-    scope = createScope({ domains: [live] })
-    current = scope
-    scope.subscribe(() => scope.dispose())
-    scope.on('live.go', () => fromSubscriber.push('listener-1'))
-    scope.on('live.go', () => fromSubscriber.push('listener-2'))
-    await scope.emit('live.go').catch(() => undefined)
+    const outcome = await scope.emit('live.go').then(
+      () => 'resolved',
+      () => 'rejected',
+    )
 
-    expect(fromEffect).to.deep.equal(fromListener)
-    expect(fromSubscriber).to.deep.equal(fromListener)
+    expect(log).to.deep.equal(['subscriber-1'])
+    expect(outcome, 'the fold committed before disposal, so its caller hears that').to.equal('resolved')
+    expect(scope.read('live')).to.deep.equal({ n: 1 })
   })
 
-  // The wiki documents this rather than fixing it — disposal draws one boundary for every job kind,
-  // and it is not this one. The shape it warns about
-  // is specific enough to pin: the effect that POSTs with the credential the logout invalidated.
-  it("runs a fold's watcher and effect even when a subscriber disposed before either started", async () => {
+  // The hazard this pins: the effect that POSTs with the credential the logout invalidated.
+  it("runs neither a fold's watcher nor its effect once a subscriber disposed the scope", async () => {
     const ran: string[] = []
 
     const logout = defineDomain('logout', [], {
@@ -178,9 +164,78 @@ describe('disposal — delivery', () => {
     await scope.emit('logout.go').catch(() => undefined)
     await flush()
 
-    // Neither had started when `dispose()` returned. Both run anyway — this is the documented
-    // boundary, not an accident, and it is why an effect must check for itself.
-    expect(ran).to.deep.equal(['watcher', 'effect'])
+    expect(ran).to.deep.equal([])
+  })
+
+  for (const disposer of ['source', 'teardown'] as const) {
+    it(`a dispose() from a watcher's ${disposer} stops that watcher's handler`, async () => {
+      const heard: string[] = []
+      let scope: { dispose: () => void } | undefined
+
+      const tear = defineDomain('tear', [], {
+        state: () => ({ n: 0 }),
+        actions: { bump: reduce(state => ({ n: state.n + 1 })) },
+        watch: {
+          n: watch(
+            state => {
+              if (disposer === 'source' && state.n === 2) {
+                scope!.dispose()
+              }
+              return state.n
+            },
+            next => {
+              heard.push(`handler-${next}`)
+              return () => {
+                heard.push(`teardown-${next}`)
+                if (disposer === 'teardown') {
+                  scope!.dispose()
+                }
+              }
+            },
+          ),
+        },
+      })
+
+      const created = createScope({ domains: [tear] })
+      scope = created
+      await created.emit('tear.bump')
+      await created.emit('tear.bump').catch(() => undefined)
+      await flush()
+
+      expect(heard).to.deep.equal(['handler-1', 'teardown-1'])
+    })
+  }
+
+  it('a dispose() from a watcher stops the watchers after it', async () => {
+    const ran: string[] = []
+    let scope: { dispose: () => void } | undefined
+
+    const pair = defineDomain('tear', [], {
+      state: () => ({ n: 0 }),
+      actions: { bump: reduce(state => ({ n: state.n + 1 })) },
+      watch: {
+        first: watch(
+          state => state.n,
+          () => {
+            ran.push('first')
+            scope!.dispose()
+          },
+        ),
+        second: watch(
+          state => state.n,
+          () => {
+            ran.push('second')
+          },
+        ),
+      },
+    })
+
+    const created = createScope({ domains: [pair] })
+    scope = created
+    await created.emit('tear.bump').catch(() => undefined)
+    await flush()
+
+    expect(ran).to.deep.equal(['first'])
   })
 
   it('a dispose() from the terminal reaction still resolves the already-decided outcome', async () => {
@@ -192,7 +247,7 @@ describe('disposal — delivery', () => {
     expect(result).to.equal('ok')
   })
 
-  it("a terminal fold that disposes and then fails does not let its own handler's success win (regression, not the shipped defect)", async () => {
+  it("a terminal fold that disposes and then fails does not let its own handler's success win", async () => {
     const scope = createScope({ domains: [settle] })
     current = scope
 
@@ -404,14 +459,13 @@ setTimeout(() => console.log('STATE_A:' + JSON.stringify(scope.read('a'))), 50)
     expect(scope.getState()).to.deep.equal({ first: { n: 1 }, second: { marker: 'new' } })
   })
 
-  it('refuses the next emit even though it finished delivering the current action', async () => {
+  it('refuses the next emit after a reaction disposed the scope', async () => {
     disposeFromEffect = true
     const scope = createScope({ domains: [live] })
     current = scope
-    scope.on('live.go', () => log.push('listener-1'))
 
     await scope.emit('live.go').catch(() => undefined)
-    expect(log).to.deep.equal(['domain-effect', 'listener-1'])
+    expect(log).to.deep.equal(['domain-effect'])
 
     let refused: unknown
     await scope.emit('live.other').catch((error: unknown) => {

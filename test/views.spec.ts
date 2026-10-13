@@ -1039,7 +1039,7 @@ console.log('VIEW:' + scope.read('collideMixedProd').doubled)
     })
   }
 
-  it('an identity selector keeps its sibling views, which the written-only snapshot used to drop', () => {
+  it('an identity selector keeps its sibling views', () => {
     let seen: Record<string, unknown> | undefined
 
     const mirror = defineDomain('mirrorViews' as never, [], {

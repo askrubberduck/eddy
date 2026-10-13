@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { cmd, createScope, defineDomain } from '../src/index'
+import { cmd, createScope, defineDomain, reduce } from '../src/index'
 import { settled } from '../src/testing'
 import { buildModeProbe } from './helpers'
 
@@ -8,7 +8,6 @@ type VersionModule = typeof import('../src/internal/version')
 function freshInstance(): VersionModule {
   const modulePath = require.resolve('../src/internal/version')
   delete require.cache[modulePath]
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   return require(modulePath) as VersionModule
 }
 
@@ -133,8 +132,137 @@ scope.emit('probe.go', 1).then(() => {
       }
 
       expect(message).to.contain("Scope 'never-quiet' did not settle")
-      expect(message, 'and names the address, which needed the inFlight fix').to.contain('stuck.wait')
+      expect(message, 'and names the address').to.contain('stuck.wait')
       scope.dispose()
+    })
+
+    it('waits for work a queued action has yet to start, when called from inside a dispatch', async () => {
+      let release!: () => void
+      const relay = defineDomain('relay' as never, [], {
+        state: () => ({ n: 0 }),
+        actions: {
+          kick: reduce(((state: { n: number }) => ({ n: state.n + 1 })) as never),
+          spawn: reduce(((state: { n: number }) => ({ n: state.n + 1 })) as never),
+          wait: cmd((() => new Promise<void>(resolve => (release = resolve))) as never),
+        },
+      })
+      const scope = createScope({ name: 'relay', domains: [relay] as never }) as never as {
+        emit: (a: string) => Promise<unknown>
+        on: (a: string, h: () => void) => () => void
+        inspect: () => { queueDepth: number; inFlight: string[]; live: number }
+        name: string
+      }
+
+      let waiter!: Promise<void>
+      let command!: Promise<unknown>
+      scope.on('relay.kick', () => {
+        void scope.emit('relay.spawn')
+        waiter = settled(scope, { timeout: 500 })
+      })
+      scope.on('relay.spawn', () => {
+        command = scope.emit('relay.wait')
+      })
+
+      await scope.emit('relay.kick')
+      let resolved = false
+      void waiter.then(() => {
+        resolved = true
+      })
+      await new Promise(resolve => setTimeout(resolve, 10))
+
+      expect(resolved, 'the command the queued spawn started is still running').to.equal(false)
+      release()
+      await command
+      await waiter
+    })
+
+    describe('a cancelled handler that is still running', () => {
+      let finished: string[]
+      const gates: Record<string, () => void> = {}
+
+      // Ignores its signal, as a handler may: cancelling it settles the caller, not the handler.
+      const deaf = defineDomain('deaf' as never, [], {
+        state: () => ({ n: 0 }),
+        actions: {
+          run: cmd(
+            (async (input: { tag: string; fail?: boolean }) => {
+              await new Promise<void>(resolve => {
+                gates[input.tag] = resolve
+              })
+              finished.push(input.tag)
+              if (input.fail) {
+                throw new Error(`${input.tag} failed on its own account`)
+              }
+              return input.tag
+            }) as never,
+            { latest: true } as never,
+          ),
+        },
+      })
+
+      beforeEach(() => {
+        finished = []
+      })
+
+      type DeafScope = {
+        emit: (a: string, i: unknown) => Promise<unknown>
+        inspect: () => { queueDepth: number; inFlight: string[]; live: number }
+        name: string
+        dispose: () => void
+      }
+
+      it('is in flight until it returns, though the scope no longer owns its invocation', async () => {
+        const scope = createScope({ name: 'deaf', domains: [deaf] as never }) as never as DeafScope
+        const first = scope.emit('deaf.run', { tag: 'first' }).catch(() => undefined)
+        const second = scope.emit('deaf.run', { tag: 'second' })
+
+        expect(scope.inspect().inFlight, 'both handlers are running').to.deep.equal(['deaf.run', 'deaf.run'])
+        expect(scope.inspect().live, 'only the newer call is owed an outcome').to.equal(1)
+
+        gates.second()
+        await second
+        await first
+        expect(scope.inspect().inFlight, 'the superseded one still runs').to.deep.equal(['deaf.run'])
+
+        gates.first()
+        await settled(scope)
+        expect(scope.inspect().inFlight).to.deep.equal([])
+        scope.dispose()
+      })
+
+      it('holds settled until it returns, so its late failure is reported inside the test', async () => {
+        const reports: string[] = []
+        const scope = createScope({
+          name: 'deaf-late',
+          domains: [deaf] as never,
+          onUnhandledError: error => reports.push(String(error)),
+        }) as never as DeafScope
+
+        void scope.emit('deaf.run', { tag: 'first', fail: true }).catch(() => undefined)
+        const second = scope.emit('deaf.run', { tag: 'second' })
+        gates.second()
+        await second
+        setTimeout(() => gates.first(), 20)
+
+        await settled(scope)
+
+        expect(finished).to.deep.equal(['second', 'first'])
+        expect(reports).to.deep.equal(['Error: first failed on its own account'])
+        scope.dispose()
+      })
+
+      it('is still in flight after disposal cancelled it, and settled waits for it', async () => {
+        const scope = createScope({ name: 'deaf-disposed', domains: [deaf] as never }) as never as DeafScope
+        const running = scope.emit('deaf.run', { tag: 'only' }).catch(() => undefined)
+        scope.dispose()
+        await running
+
+        expect(scope.inspect()).to.deep.include({ queueDepth: 0, inFlight: ['deaf.run'], live: 0 })
+
+        setTimeout(() => gates.only(), 20)
+        await settled(scope)
+        expect(finished).to.deep.equal(['only'])
+      })
     })
   })
 })

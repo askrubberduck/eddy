@@ -11,7 +11,7 @@ const isArrayIndex = (key: string): boolean => /^(?:0|[1-9]\d*)$/.test(key) && N
 
 const validated = new WeakSet<object>()
 
-// Retired from the state model, with the article the message needs.
+// Refused by name, with the article the message needs.
 const RETIRED: Record<string, string> = {
   Map: 'a Map',
   Set: 'a Set',
@@ -134,7 +134,7 @@ function walk(value: unknown, subject: string, path: string, seen: WeakSet<objec
   } else {
     const tag = Object.prototype.toString.call(object).slice(8, -1)
 
-    // Retired when the model narrowed to what serialises; named so the failure is a migration.
+    // Named, because each has an obvious serialisable replacement the message can point to.
     const retired = RETIRED[tag]
     if (retired !== undefined) {
       throw refusal(
@@ -232,6 +232,10 @@ export function unsupported(object: object): string {
   const proto = Object.getPrototypeOf(object) as object | null
   if (proto === null) {
     return 'an object with a null prototype'
+  }
+
+  if (proto === Object.prototype) {
+    return 'a plain object'
   }
 
   if (proto === Date.prototype) {
@@ -334,8 +338,7 @@ export function cloneState<T>(value: T, describeFailure: (detail: string) => str
   try {
     return clone(value, new Map<object, unknown>(), preserveUnsupported) as T
   } catch (error) {
-    const detail = (error instanceof Error ? error.message : String(error)).replace(/\.*\s*$/, '')
-    throw new Error(describeFailure(detail), { cause: error })
+    throw new Error(describeFailure(describeThrown(error)), { cause: error })
   }
 }
 
@@ -343,19 +346,25 @@ export const isPlainObject = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
 
 // Every refusal the library raises passes through `refusal`, so a wrapper naming a failed read can
-// tell its own error from a host's without matching message text.
-const refusals = new WeakSet<Error>()
+// tell its own error from a host's without matching message text. A brand, not `instanceof`: a
+// thrown value may be a Proxy, whose `getPrototypeOf` trap is host code that can throw.
+const refusals = new WeakSet<object>()
 
 export function refusal<E extends Error>(error: E): E {
   refusals.add(error)
   return error
 }
 
+export const isRefusal = (value: unknown): boolean => typeof value === 'object' && value !== null && refusals.has(value)
+
 export function refusing<T>(run: () => T): T {
   try {
     return run()
   } catch (error) {
-    throw error instanceof Error ? refusal(error) : error
+    if (typeof error === 'object' && error !== null) {
+      refusals.add(error)
+    }
+    throw error
   }
 }
 
@@ -364,8 +373,8 @@ export function refusing<T>(run: () => T): T {
  * else — a host getter, a trap, a selector — is wrapped with `describe` and kept as the cause.
  */
 export function namingTheRead(error: unknown, describe: (detail: string) => string): Error {
-  if (error instanceof Error && refusals.has(error)) {
-    return error
+  if (isRefusal(error)) {
+    return error as Error
   }
   return refusal(new Error(describe(describeThrown(error)), { cause: error }))
 }

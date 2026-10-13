@@ -5,8 +5,6 @@ A domain is tested by hosting it in a scope, emitting at it, and reading what fo
 action the scope dispatched, and a way to wait for the scope to be done that asks the scope rather
 than guessing turns.
 
-<!-- fence: skip the import alone; the example below imports it -->
-
 ```ts
 import { createTestScope, flush, settled } from '@askrubberduck/eddy/testing'
 ```
@@ -71,10 +69,11 @@ what payload. It is cheaper than a subscriber and it does not miss the actions t
 
 ## `settled(scope, { timeout }?)`
 
-Waits until the scope has nothing queued and no command handler outstanding, by reading
-`scope.inspect()` between host turns, and throws after the timeout — one second unless told
-otherwise — naming what was still outstanding. It is the wait for a command you did not await, and
-for the commands a reaction emitted.
+Waits until the scope has nothing queued, no caller owed an outcome and no command handler
+running — a cancelled handler that ignores its signal included, so its late failure is reported
+inside the test that caused it. It reads `scope.inspect()` between host turns and throws after the
+timeout — one second unless told otherwise — naming what was still outstanding. It is the wait for
+a command you did not await, and for the commands a reaction emitted.
 
 ```ts
 void scope.emit('upload.start')

@@ -21,8 +21,7 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # `check:examples` only type-checks. The shop example is the repository's one executable
-      # artifact and asserts nineteen contracts; nothing ran it, and it had never passed.
+      # `check:examples` only type-checks; this runs the shop and asserts its contracts.
       - run: npm run check:example-runs
 
       # Every tsconfig in the repository excludes `output/`, and the only compiler otherwise in play

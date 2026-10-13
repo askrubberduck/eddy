@@ -196,7 +196,6 @@ type CollidingActions = { total: Reduce }
 declare module '../src/types' {
   interface Domains {
     typeProbe: DomainType<ProbeState, ProbeActions, ProbeViews>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     linked: DomainType<LinkedState, LinkedActions, {}, 'session'>
     secrets: DomainType<SecretsState, SecretsActions>
     colliding: DomainType<CollidingState, CollidingActions, CollidingViews>

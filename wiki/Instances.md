@@ -110,7 +110,10 @@ action names no id, the fold has nowhere to land, and it refuses — and because
 transaction, that refusal fails the neighbour's own action. The other direction is fine: a domain
 that is not instanced may wire an instanced domain's action through `on`, and folds once for each,
 because the action arrives with the identity on it. An `effects` entry on an instanced domain works
-either way, because an effect folds nothing.
+either way, because an effect folds nothing. An effect that hears one of its own domain's instances
+reaches that instance: its `ctx.emit` into its own domain keeps the identity, as a command's does.
+An effect that hears a neighbour has no instance to be about, so an emit into its own domain from
+there refuses like any emit that names none.
 
 ## A released handle
 

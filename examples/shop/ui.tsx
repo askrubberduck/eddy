@@ -141,11 +141,13 @@ function SignOutButton() {
 }
 
 export function Shop() {
-  const [previewScope] = useState(() =>
-    createScope({ domains: [catalog, session, cart, analytics, quickAdd] as const }),
-  )
+  const [previewScope, setPreviewScope] = useState<typeof appScope>()
 
-  useEffect(() => () => previewScope.dispose(), [previewScope])
+  useEffect(() => {
+    const created = createScope({ domains: [catalog, session, cart, analytics, quickAdd] as const })
+    setPreviewScope(created)
+    return () => created.dispose()
+  }, [])
 
   return (
     <>
@@ -162,11 +164,13 @@ export function Shop() {
         <SignOutButton />
       </main>
 
-      <ScopeProvider scope={previewScope}>
-        <section aria-label="preview">
-          <CartSummary />
-        </section>
-      </ScopeProvider>
+      {previewScope && (
+        <ScopeProvider scope={previewScope}>
+          <section aria-label="preview">
+            <CartSummary />
+          </section>
+        </ScopeProvider>
+      )}
     </>
   )
 }

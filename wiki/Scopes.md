@@ -55,8 +55,8 @@ The name is a label for diagnostics. Two scopes may share it.
 it is the same reference until the domain moves. `getState()` returns every domain keyed by name and
 is likewise stable until something moves. `getWrittenState()` returns the written fields only,
 cloned, in the shape `preloadedState` accepts back — the [State](State) page covers persistence.
-`instances(domain)` is the aggregate of an [instanced](Instances) domain, keyed by id, and `read`
-refuses one at the type level.
+`instances(domain)` is the aggregate of an [instanced](Instances) domain, keyed by id; `read`
+refuses an instanced domain at the type level, and `instances` throws on one that is not.
 
 ```ts
 await live.emit('counter.bump', { by: 2 })
@@ -69,10 +69,12 @@ live.getState() // { counter: { value: 2 } }
 ## Inspecting
 
 `inspect()` answers what the scope is doing at this instant, and nothing in the library reads the
-answer: how many jobs are queued, which command addresses have handlers that have not settled, how
-many invocations the scope still owns, and how many times the [cascade guard](Actions) fired and
-what it last named. Addresses only, never inputs. It answers after disposal too, because that is
-when the question gets asked.
+answer: how many jobs are queued (`queueDepth`), the address of every command handler still running
+(`inFlight`), how many callers are still owed an outcome (`live`), and how many times the
+[cascade guard](Actions) fired and what it last named. Addresses only, never inputs. A handler the
+scope cancelled — superseded, or cut off by disposal — has no caller left, so `live` no longer
+counts it, but it stays in `inFlight` until it returns, because a failure of its own is still
+reported. It answers after disposal too, because that is when the question gets asked.
 
 ## Disposing
 
@@ -81,6 +83,22 @@ is rejected with `CommandAborted`; every command in flight is cancelled with it,
 unless its outcome had already been decided before disposal interrupted the reactions to it, in
 which case the caller still gets that outcome. Listeners are cleared, watcher teardowns run, and
 the view caches are released.
+
+The boundary holds inside an action too, by two rules. No callback the scope manages starts once it
+is disposed — one declared on a domain (a reducer, stage, handler, view selector or transform,
+watcher or effect) or registered with it (`onAction`, `subscribe`, `on`) — wherever the `dispose()`
+came from. And a fold publishes only if the scope is still live when it commits, so a dispose from
+inside the draft leaves the last committed state in place and the action is refused with
+`CommandAborted`. Everything the host hears about a fold — the `folded` trace, subscribers,
+watchers, effects, listeners — comes after it published, so a dispose from any of those leaves that
+fold standing and its caller still hears it resolve, while nothing after the disposing callback
+hears the action.
+
+Outside the first rule: the logger and the reporter, because telling you about the disposal is their
+job; watcher teardowns, because disposal is what runs them; and code the scope does not call on a
+schedule of its own — a `useDomainValue` selector runs whenever React renders, and a trap on a
+`Proxy` you put in state runs whenever something reads it. A disposed scope's `read` still answers,
+so both keep working; neither can make a fold publish.
 
 What a disposed scope answers is decided by what the caller survives. `read` still answers, with
 the last committed state, because a component that renders once more after unmount is not a crash.
@@ -95,6 +113,49 @@ preview.dispose()
 preview.read('counter').value // 40, still
 await preview.emit('counter.bump', { by: 1 }).catch(error => error.name) // 'CommandAborted'
 ```
+
+## Host code
+
+Everything you hand a scope — a declaration's callbacks, `onAction`, a subscriber, a listener, the
+logger and the reporter — is host code, and the scope contains whatever it does. A callback that
+throws, a handler that rejects or returns a promise whose own `then` or `constructor` throws, a value
+that is a `Proxy` with throwing traps, and a promise you were handed and then redefined: each is
+the failure of that one call or that one caller, reported or rejected, and the scope goes on. Once a
+fold has published, nothing host code does changes what its caller is told. Every obligation of
+`dispose()` — refusing the queue, settling or cancelling each command and aborting its signal,
+clearing listeners, running teardowns, releasing caches — completes on its own, whatever the others
+throw.
+
+Outside that boundary, by design:
+
+- A platform built-in the host patches — `Promise`, `WeakSet`, `Object` and their prototypes. The
+  library calls the platform and trusts it; it captures `Promise.prototype.then` at load only so that
+  a promise's own `then` is never the one called.
+- A rejected promise that host code returns, whose own `constructor`, `then` or
+  `Symbol.toStringTag` throws, on the surfaces below. Its original rejection is left unobserved:
+  state has committed and the caller's outcome is correct, and then the rejection escapes as a
+  platform unhandled rejection, which under Node's default policy terminates the process.
+  - A throwing `constructor`: from a subscriber, listener, `onAction`, watcher handler, teardown,
+    reporter, logger or command handler. This one is a platform limit: native
+    `Promise.prototype.then` reads `constructor` for the species before it installs any reaction,
+    so it cannot be bypassed without leaving the platform's promise protocol. The same holds for the
+    promise `emit` handed a caller, if the caller redefines its `constructor`: when the scope
+    cancels that command, it cannot mark the rejection handled.
+  - A throwing `Symbol.toStringTag`: from a subscriber, listener, `onAction`, watcher handler,
+    teardown, reporter or logger. This one is eddy's choice: it recognises a promise returned from
+    those callbacks by reading the tag, and a throw there ends the check. A command handler's
+    result is not classified this way, and stays contained.
+  - A throwing own `then`: from a logger, whose return value eddy reads `then` on, or a command
+    handler, whose result it resolves into a promise of its own. From the six other reaction
+    surfaces it stays contained, because eddy never calls a promise's own `then`.
+- A handler that never settles. It stays in `inspect().inFlight`, and `settled()` times out on it.
+- A result whose `then` answers differently each time it is read. The library reads it once when
+  the handler's promise settles and the platform reads it again when the caller's does; what the
+  caller is told then follows the value, not the fold.
+- The `join` promise. Every joining caller shares the first caller's promise, so a caller that
+  poisons it poisons it for all of them.
+- Host code the scope does not call: a `useDomainValue` selector runs whenever React renders, and a
+  trap on a `Proxy` in state runs whenever anything reads it.
 
 ## Settings
 

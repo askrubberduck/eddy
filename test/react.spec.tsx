@@ -12,6 +12,7 @@ import React, {
   useTransition,
 } from 'react'
 import { createScope } from '../src/index'
+import type { Scope } from '../src/index'
 import { createScopeHooks, shallowEqual } from '../src/react'
 import { flush } from '../src/testing'
 import { api, cart, draft, observed, session, upload } from './fixtures'
@@ -57,7 +58,6 @@ describe('react', () => {
 
   describe('address narrowing', () => {
     it('is a compile error to reach a domain the scope does not host', () => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       function neverCalled(hooks: ReturnType<typeof createScopeHooks<'cart' | 'session'>>) {
         hooks.useDomain('cart')
         hooks.useDomainValue('session', s => s.userId)
@@ -502,6 +502,53 @@ describe('react', () => {
 
       expect(RTL.screen.getByTestId('main').textContent).to.equal('0')
       expect(RTL.screen.getByTestId('other').textContent).to.equal('1')
+    })
+
+    // The React page's preview pattern. StrictMode replays effects: a scope made in render and
+    // disposed in cleanup is disposed for the rest of its life, so the effect makes and disposes it.
+    it('keeps a component-owned scope alive across a StrictMode replay', async () => {
+      const errors: unknown[] = []
+      const main = createScope({ name: 'owned-main', domains: [cart, session] })
+      const { ScopeProvider, useDomainValue } = createScopeHooks(main)
+      let held: Scope<'cart' | 'session'> | undefined
+
+      function Count() {
+        const n = useDomainValue('cart', s => s.itemCount)
+        return <span data-testid="preview">{n}</span>
+      }
+
+      function Owner() {
+        const [preview, setPreview] = useState<Scope<'cart' | 'session'>>()
+        useEffect(() => {
+          const created = createScope({
+            name: 'owned-preview',
+            domains: [cart, session],
+            logger: { debug: () => undefined, info: () => undefined, error: (...line) => errors.push(line) },
+          })
+          setPreview(created)
+          return () => created.dispose()
+        }, [])
+        held = preview
+
+        return preview ? (
+          <ScopeProvider scope={preview}>
+            <Count />
+          </ScopeProvider>
+        ) : null
+      }
+
+      RTL.render(
+        <StrictMode>
+          <Owner />
+        </StrictMode>,
+      )
+
+      await RTL.act(async () => {
+        await held!.emit('cart.add', { sku: 'SKU-1', qty: 1 })
+      })
+
+      expect(RTL.screen.getByTestId('preview').textContent).to.equal('1')
+      expect(errors).to.deep.equal([])
     })
   })
 

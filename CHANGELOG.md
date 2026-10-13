@@ -6,6 +6,60 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
+## 0.4.0 — 2026-10-13
+
+### Changed
+
+- Disposal is one boundary inside an action as well as between them. No callback starts once the
+  scope is disposed, so an effect cannot act on a session the disposal ended; before, the rest of the
+  action was delivered to a disposed scope. A dispose from inside a draft — a reducer, a selector, a
+  transform — publishes nothing and refuses the action with `CommandAborted`; before, the draft
+  published and the action resolved.
+- `inspect().inFlight` names every command handler still running, one entry per handler, including
+  one the scope cancelled that has not returned; `live` counts the callers still owed an outcome.
+  The two were the same set before, so a superseded or disposal-cancelled handler vanished from
+  both while it ran. `settled()` now waits for those handlers too, so a late failure of their own is
+  reported inside the test that caused it rather than the next one.
+
+- An `on` or `effects` wire to an address a hosted domain does not answer — the domain's own, or a
+  hosted neighbour it does not declare in `uses` — fails `createScope`. Only a typo against a
+  declared neighbour did before; the other two were dropped with an error line, though the domain
+  was right there. A wire into a domain the scope does not host is still dropped and logged.
+
+### Removed
+
+- `DispatchedAction.__generation` is off the public type. It is the scope's own record of which
+  instance of an id an action was made for, and nothing outside the scope can compare it to anything.
+
+### Fixed
+
+- Once a fold has published, nothing a reaction throws changes what its caller is told. A watcher
+  that threw a value whose prototype trap throws — a revoked `Proxy` — escaped containment and
+  rejected a reduce whose state had already committed.
+- `dispose()` completes every obligation — cancelling commands and aborting their signals,
+  clearing listeners, running teardowns, releasing caches — even when a teardown throws or a caller
+  redefined the promise it was handed.
+- A handler returning a promise whose own `then` throws fails that call. The throw escaped from
+  `emit` and left the invocation running forever.
+- Declared, not fixed: for a rejected promise host code returns whose own `constructor`, `then` or
+  `Symbol.toStringTag` throws, eddy can leave the original rejection unobserved on the specific
+  surfaces the Scopes page lists under "Host code". There it escapes as a platform unhandled
+  rejection, which under Node's default policy terminates the process; state and the caller's
+  outcome are correct up to then.
+
+- `createTestScope` takes the options `createScope` takes. Its type had its own list, which left out
+  `preloadedState`, though the option passed through at runtime.
+
+- An effect on an instanced domain that hears one of its own instances' actions emits back into that
+  instance. Its `ctx` carried no identity, so every emit into its own domain was refused, though the
+  type admitted it.
+
+- A fold dropped because its instance had gone is reported once per fold. Before, the report was
+  deduplicated per id and the reset on re-seeding never matched, so after the first report every
+  later instance under that id was stranded silently.
+- A scope no longer keeps a record of every instance id it ever saw. `useDomainInstance` mints an id
+  per mount, so a long-lived scope grew by about a hundred bytes per mount for its whole life.
+
 ## 0.3.0 — 2026-09-10
 
 The first published release. Everything below is what the package contains, not a delta from a

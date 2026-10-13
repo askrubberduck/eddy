@@ -23,13 +23,10 @@ export type Hosted = DomainState & {
   // where `written` is the domain's own state.
   instanced: boolean
   seedInstance: () => Record<string, unknown>
-  // One entry per live id. `owners` is how many handles hold it; the last one out disposes.
-  // `generation` counts how many times the id has been seeded, so a handle can tell its instance
-  // from a later one wearing the same string: the identity is the id *and* the generation.
+  // One entry per held id. `owners` is how many handles hold it; the last one out disposes.
+  // `generation` tells a handle's instance from a later one wearing the same string: the identity
+  // is the id *and* the generation.
   instances: Map<string, { owners: number; generation: number }>
-  // Instances already reported for receiving a fold after disposal, so a stranded command reports
-  // once rather than once per terminal stage.
-  reportedOrphans: Set<string>
   // Neighbours this domain has already been reported for reaching undeclared, this scope.
   reportedUndeclared: Set<string>
   actions: Record<string, DeclaredAction>
@@ -170,6 +167,7 @@ export function hostDomains(
   preloadOption: unknown,
   log: Log,
   logLevel: LogLevel | undefined,
+  guard: <T>(callback: T) => T,
 ): Map<string, Hosted> {
   const readingPreload = <T>(subject: string, read: () => T): T => {
     try {
@@ -255,19 +253,19 @@ export function hostDomains(
 
     const actions = declaredIn('actions', ['cmd', 'reduce'], def.actions, (entry, kind) => {
       if (kind === 'reduce') {
-        return { kind, handler: (entry as ReduceEntry).handler } as DeclaredAction
+        return { kind, handler: guard((entry as ReduceEntry).handler) } as DeclaredAction
       }
       const command = entry as CommandEntry
 
       const stages = command.stages ?? ({} as CommandEntry['stages'])
       return {
         kind,
-        handler: command.handler,
+        handler: guard(command.handler),
         stages: {
-          called: stages.called,
-          done: stages.done,
-          failed: stages.failed,
-          finally: stages.finally,
+          called: guard(stages.called),
+          done: guard(stages.done),
+          failed: guard(stages.failed),
+          finally: guard(stages.finally),
           latest: stages.latest,
           join: stages.join,
         },
@@ -275,22 +273,22 @@ export function hostDomains(
     })
     const views = declaredIn('views', ['view'], def.views, (entry, kind) => ({
       kind,
-      input: entry.input,
-      transform: entry.transform,
+      input: guard(entry.input),
+      transform: guard(entry.transform),
     }))
     const watchers = declaredIn('watch', ['watch'], def.watchers, (entry, kind) => ({
       kind,
-      source: entry.source,
-      handler: entry.handler,
+      source: guard(entry.source),
+      handler: guard(entry.handler),
     }))
 
     checkActionRules(declaredSubject, actions)
     checkViewRules(declaredSubject, views, actions)
 
-    const on = declaredIn('on', ['reduce'], def.on, (entry, kind) => ({ kind, handler: entry.handler }))
+    const on = declaredIn('on', ['reduce'], def.on, (entry, kind) => ({ kind, handler: guard(entry.handler) }))
     const effects = declaredIn('effects', ['effect'], def.effects, (entry, kind) => ({
       kind,
-      handler: entry.handler,
+      handler: guard(entry.handler),
     }))
 
     const preloaded = readingPreload(`the preloaded state for domain '${domainName}'`, () =>
@@ -389,7 +387,6 @@ export function hostDomains(
 
     hosted.set(domainName, {
       reportedUndeclared: new Set<string>(),
-      reportedOrphans: new Set<string>(),
       instances: new Map<string, { owners: number; generation: number }>(),
       instanced,
       seedInstance,
@@ -435,16 +432,10 @@ export function hostDomains(
     return !parsed.stage || host.actions[parsed.action].kind === 'cmd'
   }
 
-  // Split by what the author can have meant. A wire naming a domain this one declares in `uses` is
-  // a typo about something it believes exists, so it throws. A wire into a domain the scope does not
-  // host may be legitimate — a blueprint hosted in a smaller scope — so it is dropped and logged.
-  const wireWasDeclared = (entry: Hosted, address: string): boolean => {
-    const parsed = parseAddress(address)
-    return parsed !== undefined && entry.uses.includes(parsed.domain)
-  }
-
-  // A declared wire that resolves to nothing is silently inert. TypeScript is the loud failure;
-  // here the wire is dropped and logged.
+  // Split by what the author can have meant. A wire into a domain this scope hosts — its own, or
+  // any neighbour — is a typo about something that exists, so it throws. A wire into a domain the
+  // scope does not host may be legitimate — a blueprint hosted in a smaller scope — so it is dropped
+  // and logged. TypeScript is the loud failure for both.
   for (const entry of hosted.values()) {
     for (const map of ['on', 'effects'] as const) {
       for (const address of Object.keys(entry[map])) {
@@ -452,11 +443,11 @@ export function hostDomains(
           continue
         }
 
-        if (wireWasDeclared(entry, address)) {
+        const domain = parseAddress(address)?.domain
+        if (domain !== undefined && hosted.has(domain)) {
           throw new Error(
             `Unable to create scope '${name}': domain '${entry.name}' declares '${map}' for '${address}', and ` +
-              `'${parseAddress(address)?.domain}' is in its 'uses' but has no such action — a wire to nowhere is ` +
-              `not architecture`,
+              `'${domain}' is hosted here and answers no such address — a wire to nowhere is not architecture`,
           )
         }
 

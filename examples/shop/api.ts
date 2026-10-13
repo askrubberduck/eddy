@@ -29,7 +29,7 @@ export const api = {
     await latency(25)
 
     if (signal.aborted) {
-      throw new Error(`reserve('${sku}') was aborted`)
+      throw signal.reason
     }
 
     if ((stock[sku] ?? 0) < qty) {
@@ -44,7 +44,7 @@ export const api = {
     await latency(30)
 
     if (signal.aborted) {
-      throw new Error('placeOrder was aborted')
+      throw signal.reason
     }
 
     return { id: `ord-${(orderCounter += 1).toString().padStart(3, '0')}` }
@@ -55,7 +55,7 @@ export const api = {
     await latency(40)
 
     if (signal.aborted) {
-      throw new Error(`validateCoupon('${code}') was aborted`)
+      throw signal.reason
     }
 
     const percent = coupons[code]

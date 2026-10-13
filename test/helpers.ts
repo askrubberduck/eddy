@@ -105,6 +105,7 @@ export function buildModeProbe(
     withReact?: boolean
     withTesting?: boolean
     withoutErrorIsError?: boolean
+    execArgv?: string[]
   } = {},
 ): string[] {
   const entry = buildOnce()
@@ -135,7 +136,7 @@ ${snippet}
   )
 
   try {
-    const out = execFileSync(process.execPath, [file], {
+    const out = execFileSync(process.execPath, [...(options.execArgv ?? []), file], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...(options.withReact ? { NODE_PATH: resolve('node_modules') } : {}), ...options.env },

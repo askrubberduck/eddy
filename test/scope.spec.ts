@@ -3,7 +3,7 @@ import { runInNewContext } from 'node:vm'
 import { cmd, createScope, defineDomain, reduce, view, watch, effect, CommandAborted } from '../src/index'
 import type { Cmd, DispatchedAction, DomainType, Reduce, Scope } from '../src/index'
 import type { DomainDef } from '../src/domain'
-import { createTestScope, flush, resetVersion } from '../src/testing'
+import { createTestScope, flush, resetVersion, settled } from '../src/testing'
 import { buildModeProbe, platformRejections, rejects } from './helpers'
 import { api, audit, cart, draft, observed, session, upload, type CartState } from './fixtures'
 
@@ -62,9 +62,7 @@ declare module '../src/types' {
     restore: DomainType<RestoreState, RestoreActions>
     protoNamedView: DomainType<{ n: number }, { bump: Reduce }>
     lensHasDomain: DomainType<LensHasState, LensHasActions, LensHasViews>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     mutualA: DomainType<MutualAState, MutualAActions, {}, 'mutualB'>
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     mutualB: DomainType<MutualBState, MutualBActions, {}, 'mutualA'>
   }
 }
@@ -472,6 +470,18 @@ describe('scope', () => {
         await rejects(returned!, /Unable to emit: an address must be a string/)
       })
     }
+
+    it('names a plain object as one, rather than as a visitor from another realm', async () => {
+      const scope = createTestScope({ domains: [cart, session] })
+
+      await rejects(
+        (scope.emit as (a: unknown) => Promise<unknown>)({}),
+        /^Unable to emit: an address must be a string, but a plain object arrived$/,
+      )
+      expect(() => (scope.on as (a: unknown, h: () => void) => void)({}, () => undefined)).to.throw(
+        'Unable to observe: an address must be a string, but a plain object arrived',
+      )
+    })
 
     it('refuses a non-string address to observe, in its own words', () => {
       const scope = createTestScope({ domains: [cart, session] })
@@ -893,6 +903,121 @@ console.log(String(scope.read('shelf').items.length))
   })
 
   describe('instanced domain state', () => {
+    describe('a fold dropped because its instance went', () => {
+      type Strandable = {
+        instance: (d: string, id: string) => { emit: (a: string) => Promise<unknown>; dispose: () => void }
+      }
+
+      const strandable = (causes: string[]) => {
+        const releases: (() => void)[] = []
+        const def = defineDomain('strand' as never, [], {
+          instanced: true,
+          state: () => ({ saved: 0, settled: 0 }),
+          actions: {
+            save: cmd(() => new Promise<void>(resolve => releases.push(resolve)), {
+              done: (state: { saved: number }) => ({ saved: state.saved + 1 }),
+              finally: (state: { settled: number }) => ({ settled: state.settled + 1 }),
+            } as never),
+          },
+        } as never)
+        const scope = createScope({
+          domains: [def] as never,
+          logger: {
+            debug: () => undefined,
+            info: () => undefined,
+            error: (_event: unknown, record: unknown) => causes.push(String((record as { cause?: string })?.cause)),
+          },
+        }) as never as Strandable
+        return { scope, release: () => releases.shift()!() }
+      }
+
+      it('is reported once for a fold with two stages', async () => {
+        const causes: string[] = []
+        const { scope, release } = strandable(causes)
+
+        const handle = scope.instance('strand', 'a')
+        const saving = handle.emit('strand.save')
+        handle.dispose()
+        release()
+        await saving
+
+        expect(causes).to.deep.equal(["an instance of domain 'strand' is gone, so the fold was dropped"])
+      })
+
+      it('is reported again for a later instance seeded under the same id', async () => {
+        const causes: string[] = []
+        const { scope, release } = strandable(causes)
+
+        for (const _round of [1, 2]) {
+          const handle = scope.instance('strand', 'a')
+          const saving = handle.emit('strand.save')
+          handle.dispose()
+          release()
+          await saving
+        }
+
+        expect(causes).to.have.length(2)
+      })
+    })
+
+    it('lets an effect emit back into the instance whose action it heard', async () => {
+      const reports: unknown[] = []
+      const def = defineDomain('echoing' as never, [], {
+        instanced: true,
+        state: () => ({ title: '', echoed: 0 }),
+        actions: {
+          type: reduce((_s: never, a: { input: string }) => ({ title: a.input })),
+          echo: reduce((s: { echoed: number }) => ({ echoed: s.echoed + 1 })),
+        },
+        effects: {
+          'echoing.type': effect((async (_action: unknown, ctx: { emit: (a: string) => Promise<unknown> }) => {
+            await ctx.emit('echoing.echo')
+          }) as never),
+        },
+      } as never)
+      const scope = createScope({
+        domains: [def] as never,
+        onUnhandledError: error => reports.push(error),
+      }) as never as {
+        instance: (d: string, id: string) => { emit: (a: string, i?: unknown) => Promise<unknown> }
+        instances: (d: string) => Record<string, { echoed: number }>
+      }
+
+      await scope.instance('echoing', 'a').emit('echoing.type', 'hello')
+      scope.instance('echoing', 'b')
+      await flush()
+
+      expect(reports).to.deep.equal([])
+      expect(scope.instances('echoing')['a'].echoed).to.equal(1)
+      expect(scope.instances('echoing')['b'].echoed, 'and only into that instance').to.equal(0)
+    })
+
+    it('keeps no book for an instance that has gone', function () {
+      this.timeout(30000)
+      // A minted id per mount is the React binding's default, so a long-lived scope sees an unbounded
+      // number of distinct ids. Measured in a child process, where the heap can be collected.
+      const [line] = buildModeProbe(
+        `
+const row = eddy.defineDomain('row', [], { instanced: true, state: () => ({ v: 0 }), actions: {} })
+const scope = eddy.createScope({ domains: [row] })
+const heap = () => {
+  for (let i = 0; i < 4; i += 1) global.gc()
+  return process.memoryUsage().heapUsed
+}
+scope.instance('row', 'warm').dispose()
+const before = heap()
+for (let i = 0; i < 200000; i += 1) scope.instance('row', 'row-' + i).dispose()
+const grown = heap() - before
+// Read after measuring, or the collector may take the whole scope with its books.
+console.log('GROWTH_MB:' + (grown / 1e6).toFixed(1) + ' LIVE:' + Object.keys(scope.instances('row')).length)
+`,
+        { execArgv: ['--expose-gc'] },
+      )
+
+      expect(line).to.match(/ LIVE:0$/)
+      expect(parseFloat(line.slice('GROWTH_MB:'.length)), line).to.be.below(5)
+    })
+
     it('drops a terminal fold whose instance was replaced while the command was in flight', async () => {
       let release!: (v: number) => void
       const gate = new Promise<number>(r => {
@@ -1256,6 +1381,45 @@ console.log(String(scope.read('shelf').items.length))
       expect(() => createScope({ name: 'watched-instance', domains: [watched] })).to.throw(/instanced/)
     })
 
+    it('refuses a view on an instanced domain', () => {
+      const viewed = defineDomain('viewedInstance' as never, [], {
+        instanced: true,
+        state: () => ({ text: '' }),
+        actions: { type: reduce({ text: 'x' }) },
+        views: {
+          length: view(((state: { text: string }) => state.text) as never, ((text: string) => text.length) as never),
+        },
+      } as never)
+
+      expect(() => createScope({ name: 'viewed-instance', domains: [viewed] as never })).to.throw(
+        /is instanced and declares views/,
+      )
+    })
+
+    it("fails a neighbour's plain action that an instanced domain wires through on", async () => {
+      const source = defineDomain('plainSource' as never, [], {
+        state: { n: 0 },
+        actions: { ping: reduce((state: { n: number }) => ({ n: state.n + 1 })) },
+      } as never)
+      const listener = defineDomain(
+        'instancedListener' as never,
+        ['plainSource'] as never,
+        {
+          instanced: true,
+          state: () => ({ heard: 0 }),
+          actions: { noop: reduce({}) },
+          on: { 'plainSource.ping': reduce((state: { heard: number }) => ({ heard: state.heard + 1 })) },
+        } as never,
+      )
+      const scope = createScope({ domains: [source, listener] as never }) as never as {
+        emit: (a: string) => Promise<unknown>
+        read: (d: string) => { n: number }
+      }
+
+      await rejects(scope.emit('plainSource.ping'), /it is instanced, so the action must name an instance/)
+      expect(scope.read('plainSource').n, 'one transaction, so the neighbour did not fold either').to.equal(0)
+    })
+
     // `instances` is the named aggregate accessor, but it accepts an ordinary domain
     // and hands back that domain's single state while its type promises an aggregate keyed by id.
     // That recreates the same silent shape lie in reverse, so the surface must refuse the domain.
@@ -1283,7 +1447,7 @@ console.log(String(scope.read('shelf').items.length))
   })
 
   describe('the write path', () => {
-    it('publishes a new own key that holds undefined, which absence and presence used to read alike', async () => {
+    it('publishes a new own key that holds undefined, which is not the same as absent', async () => {
       let notified = 0
 
       const shape = defineDomain('shapeWriter', [], {
@@ -1558,6 +1722,29 @@ console.log(String(scope.read('shelf').items.length))
       expect(() => createScope({ name: 'wire-typo', domains: [target, typo] as never })).to.throw(/wireTarget\.rael/)
     })
 
+    for (const [label, wires, hosted] of [
+      ["the domain's own missing action", { on: { 'selfWire.og': reduce({ n: 1 }) } }, false],
+      [
+        "an outcome of the domain's own pure action",
+        { effects: { 'selfWire.go.done': effect(() => undefined) } },
+        false,
+      ],
+      ['a hosted neighbour it does not declare', { on: { 'wireTarget.rael': reduce({ n: 1 }) } }, true],
+    ] as const) {
+      it(`throws for a wire naming ${label}, since that domain is hosted`, () => {
+        const target = defineDomain('wireTarget' as never, [], { state: { n: 0 }, actions: { real: reduce({ n: 1 }) } })
+        const own = defineDomain('selfWire' as never, [], {
+          state: { n: 0 },
+          actions: { go: reduce({ n: 2 }) },
+          ...wires,
+        } as never)
+
+        expect(() => createScope({ name: 'self-wire', domains: (hosted ? [target, own] : [own]) as never })).to.throw(
+          /Unable to create scope 'self-wire': domain 'selfWire' declares '(on|effects)' for '/,
+        )
+      })
+    }
+
     it('still hosts a blueprint whose wire names a domain this scope does not have', () => {
       const { seen, settings } = errorsOnly()
       const blueprint = defineDomain('blueprint' as never, [], {
@@ -1740,6 +1927,45 @@ console.log(String(scope.read('shelf').items.length))
       await flush(5)
 
       expect((errors[0] as Error).message).to.equal('caller observer rejected')
+    })
+
+    it('names an unnamed scope, and forgets what it recorded on clearActions', async () => {
+      const scope = createTestScope({ domains: [cart, session] })
+      await scope.emit('cart.clear')
+
+      expect(scope.name).to.match(/^test-\d+$/)
+      expect(scope.actionTypes()).to.deep.equal(['cart.clear'])
+
+      scope.clearActions()
+      expect(scope.actions()).to.deep.equal([])
+
+      await scope.emit('cart.clear')
+      expect(scope.actionTypes()).to.deep.equal(['cart.clear'])
+    })
+
+    for (const times of [3, 5]) {
+      it(`flush(${times === 3 ? '' : times}) yields to the host ${times} times`, async () => {
+        let turns = 0
+        let ticking = true
+        const tick = () => {
+          if (ticking) {
+            turns += 1
+            setTimeout(tick, 0)
+          }
+        }
+        setTimeout(tick, 0)
+
+        await (times === 3 ? flush() : flush(times))
+        ticking = false
+
+        expect(turns).to.equal(times)
+      })
+    }
+
+    it('takes the options createScope takes, preloaded state included', () => {
+      const scope = createTestScope({ domains: [cart, session], preloadedState: { session: { userId: 'u-1' } } })
+
+      expect(scope.read('session').userId).to.equal('u-1')
     })
   })
 
@@ -2673,7 +2899,7 @@ console.log(String(scope.read('shelf').items.length))
     for (const [label, handler, arrived] of [
       ['an array', [], 'an array'],
       ['a primitive', 42, 'a number'],
-      ['a string, which used to spread into numbered fields', 'ab', 'a string'],
+      ['a string, which would spread into numbered fields', 'ab', 'a string'],
     ] as const) {
       it(`refuses a pure action whose constant handler is ${label}`, async () => {
         const def = define('oddConstant')
@@ -3733,7 +3959,7 @@ console.log(String(scope.read('shelf').items.length))
       expect(a.read('cart').items).to.not.equal(b.read('cart').items)
     })
 
-    it('gives each scope its own copy of a value seed, nested data included', async () => {
+    it('gives each scope its own copy of a value seed', async () => {
       const a = createScope({ name: 'seed-value-a', domains: [audit, cart, session] })
       const b = createScope({ name: 'seed-value-b', domains: [audit, cart, session] })
 
@@ -4443,7 +4669,7 @@ void (scope as any).emit('trap.go')
     })
 
     it('answers after disposal, because that is when the question gets asked', async () => {
-      const scope = createScope({ name: 'gone', domains: [cart, session] })
+      const scope = createScope({ name: 'gone', domains: [cart, session], onUnhandledError: () => undefined })
       const running = scope.emit('cart.slow', { tag: 'a' })
       await flush(1)
       scope.dispose()
@@ -4451,8 +4677,13 @@ void (scope as any).emit('trap.go')
 
       const report = scope.inspect()
       expect(report.queueDepth).to.equal(0)
-      expect(report.inFlight).to.deep.equal([])
+      expect(report.inFlight, 'the cancelled handler ignores its signal and is still running').to.deep.equal([
+        'cart.slow',
+      ])
       expect(report.live).to.equal(0)
+
+      await settled(scope)
+      expect(scope.inspect().inFlight).to.deep.equal([])
     })
 
     it('counts the drains its own guard aborted, and keeps the cause', async () => {

@@ -1,6 +1,6 @@
 import type { ViewEntry } from './domain'
 import { isEqual } from './internal/equal'
-import { checkState, inDevelopment, refusal } from './internal/state-value'
+import { checkState, inDevelopment, isRefusal, refusal } from './internal/state-value'
 
 // Entries are replaced, never mutated, so a copied cache remains a rollback snapshot.
 export type ViewCache = Map<string, { input: unknown; value: unknown }>
@@ -186,10 +186,10 @@ export function resolveViews(
       } catch (error) {
         // The lens exposes each view as an accessor, so a lens returned inside a container fails
         // here. Saying so turns a puzzling refusal into an instruction.
-        if (error instanceof TypeError && error.message.includes('an accessor property')) {
+        if (isRefusal(error) && (error as Error).message.includes('an accessor property')) {
           throw refusal(
             new TypeError(
-              `${error.message}. If that is the state object this selector received, return a plain ` +
+              `${(error as Error).message}. If that is the state object this selector received, return a plain ` +
                 `copy of what it needs instead — the lens resolves each view through an accessor, and ` +
                 `state holds data`,
               { cause: error },

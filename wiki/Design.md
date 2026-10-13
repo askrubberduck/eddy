@@ -16,8 +16,10 @@ nothing. Every absence in that list is a choice.
 1. **A fold is atomic, within one scope.** A dispatch publishes all of its drafts or none. The
    qualifier is real: a fold that emits into a second scope and then throws leaves the first rolled
    back and the second's commit standing.
-2. **`emit` rejects; it never throws.** Declaring a domain and creating a scope are the two places
-   that throw, because no promise exists yet.
+2. **`emit` rejects; it never throws.** A call with no promise to reject through throws instead:
+   declaring a domain, creating a scope, and the synchronous calls whose pages say so — `on` with an
+   address it cannot resolve, `instance` and `instances` on the wrong domain, `getState` after
+   disposal, and a released handle's `read`.
 3. **Development refuses, production trusts.** A development build walks and freezes every value
    that enters state; a production build does neither, and no hot-path scan exists to make a page
    true. The one production walk is the `__proto__` scan of `preloadedState`, the one ingress meant
