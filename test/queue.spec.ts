@@ -785,14 +785,44 @@ describe('causality â€” a terminal action carries the version of the action that
 
 // Handlers that pass `ctx.signal` to their work, which is what the wiki instructs, rejecting three
 // different ways once the library aborts them.
+// The held call waits on a gate the test opens only after the cancellation is asserted, so a
+// loaded machine cannot let it finish before the call that supersedes it is emitted.
+const HELD = -1
+let held: { gate: Promise<void>; signal?: AbortSignal } = { gate: Promise.resolve() }
+
+const hold = (ms: number, signal: AbortSignal): Promise<void> => {
+  if (ms !== HELD) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+  held.signal = signal
+  return held.gate
+}
+
 const waitFor = (ms: number, signal: AbortSignal, rejectWith: () => unknown) =>
   new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(rejectWith())
-    })
+    void hold(ms, signal).then(resolve)
+    signal.addEventListener('abort', () => reject(rejectWith()))
   })
+
+// The gate opens even when an assertion fails, so no held handler outlives its case.
+const supersedeHeld = async (emit: (ms: number) => Promise<unknown>) => {
+  let open = (): void => undefined
+  held = {
+    gate: new Promise(resolve => {
+      open = resolve
+    }),
+  }
+  const first = emit(HELD).catch(() => undefined)
+  try {
+    await flush()
+    expect(held.signal, 'the held call started').to.not.equal(undefined)
+    await emit(10)
+    expect(held.signal?.aborted, 'the held call was superseded').to.equal(true)
+  } finally {
+    open()
+    await first
+  }
+}
 
 const cancelShapes = defineDomain('cancelShapes', [], {
   state: () => ({ n: 0 }),
@@ -812,8 +842,8 @@ const cancelShapes = defineDomain('cancelShapes', [], {
       { latest: true },
     ),
     plain: cmd(
-      async (ms: number) => {
-        await new Promise(resolve => setTimeout(resolve, ms))
+      async (ms: number, ctx) => {
+        await hold(ms, ctx.signal)
         throw new Error('late failure')
       },
       { latest: true },
@@ -830,14 +860,13 @@ describe('a cancelled invocation and the failure that is really the handlerâ€Œâ€
       onUnhandledError: error => reported.push(String((error as Error)?.message)),
     })
 
-    const first = scope.emit(address, 60).catch(() => undefined)
-    await new Promise(resolve => setTimeout(resolve, 5))
-    await scope.emit(address, 10).catch(() => undefined)
-    await first
-    await settled(scope)
-    await new Promise(resolve => setTimeout(resolve, 90))
-
-    scope.dispose()
+    try {
+      await supersedeHeld(ms => scope.emit(address, ms).catch(() => undefined))
+      await settled(scope)
+      await new Promise(resolve => setTimeout(resolve, 90))
+    } finally {
+      scope.dispose()
+    }
     return reported
   }
 
@@ -857,9 +886,8 @@ describe('a cancelled invocation and the failure that is really the handlerâ€Œâ€
         run: cmd(
           async (ms: number, ctx) => {
             await new Promise<void>((resolve, reject) => {
-              const timer = setTimeout(resolve, ms)
+              void hold(ms, ctx.signal).then(resolve)
               ctx.signal.addEventListener('abort', () => {
-                clearTimeout(timer)
                 // A handler holds the signal, so it can shadow the public property the library
                 // would otherwise compare against, and then fail for its own reasons.
                 const failure = new Error('genuine handler failure')
@@ -880,14 +908,14 @@ describe('a cancelled invocation and the failure that is really the handlerâ€Œâ€
       onUnhandledError: error => reported.push(String((error as Error)?.message)),
     })
 
-    const first = scope.emit('shadowReason.run', 60).catch(() => undefined)
-    await new Promise(resolve => setTimeout(resolve, 5))
-    await scope.emit('shadowReason.run', 10)
-    await first
-    await new Promise(resolve => setTimeout(resolve, 90))
+    try {
+      await supersedeHeld(ms => scope.emit('shadowReason.run', ms))
+      await new Promise(resolve => setTimeout(resolve, 90))
+    } finally {
+      scope.dispose()
+    }
 
     expect(reported).to.deep.equal(['genuine handler failure'])
-    scope.dispose()
   })
 
   it('still reports a late failure from a handler that ignored the signal', async () => {
