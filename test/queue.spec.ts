@@ -107,6 +107,8 @@ let started: number[] = []
 
 let onAbort: ((id: number) => void) | undefined
 
+let holdFirst: Promise<void> | undefined
+
 const race = defineDomain('race', [], {
   state: () => ({ winner: 0, started: [] }),
   actions: {
@@ -114,7 +116,7 @@ const race = defineDomain('race', [], {
       async (input, ctx) => {
         started.push(input.id)
         ctx.signal.addEventListener('abort', () => onAbort?.(input.id))
-        await new Promise(resolve => setTimeout(resolve, 5))
+        await (input.id === 1 && holdFirst ? holdFirst : new Promise(resolve => setTimeout(resolve, 5)))
         if (ctx.signal.aborted) {
           throw new CommandAborted('race.go')
         }
@@ -287,6 +289,7 @@ describe('the dispatch queue', () => {
     resetVersion()
     started = []
     onAbort = undefined
+    holdFirst = undefined
     current = undefined
     sawA = []
     sawB = []
@@ -361,17 +364,23 @@ describe('the dispatch queue', () => {
         }
       }
 
+      let releaseFirst = (): void => undefined
+      holdFirst = new Promise(resolve => {
+        releaseFirst = resolve
+      })
+
       const first = scope.emit('race.go', { id: 1 })
       void first.catch(() => undefined)
       await flush(2)
       const second = scope.emit('race.go', { id: 2 })
       void second.catch(() => undefined)
+      releaseFirst()
+
+      expect(((await settlement(first)) as { error: unknown }).error).to.be.instanceOf(CommandAborted)
 
       await flush(10)
 
       expect(scope.read('race').winner).to.equal(3)
-      expect(await settlement(first)).to.deep.equal({ error: ((await settlement(first)) as { error: unknown }).error })
-      expect(((await settlement(first)) as { error: unknown }).error).to.be.instanceOf(CommandAborted)
       expect(((await settlement(second)) as { error: unknown }).error).to.be.instanceOf(CommandAborted)
       expect(await settlement(promises[0])).to.deep.equal({ ok: 3 })
     })
@@ -388,11 +397,20 @@ describe('the dispatch queue', () => {
         }
       }
 
+      let releaseFirst = (): void => undefined
+      holdFirst = new Promise(resolve => {
+        releaseFirst = resolve
+      })
+
       const first = scope.emit('race.go', { id: 1 })
       void first.catch(() => undefined)
       await flush(2)
       const second = scope.emit('race.go', { id: 2 })
       void second.catch(() => undefined)
+      releaseFirst()
+
+      expect(((await settlement(first)) as { error: unknown }).error).to.be.instanceOf(CommandAborted)
+
       await flush(10)
 
       expect(scope.actionTypes()).to.deep.equal(['race.go', 'race.note', 'race.go', 'race.go.done'])
