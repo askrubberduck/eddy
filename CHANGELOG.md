@@ -6,7 +6,11 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
-## 0.4.0 — 2026-10-13
+## 0.4.1 — 2026-10-13
+
+The first published release of the changes below. The `v0.4.0` tag was never published: the
+release gate's audit refused high advisories in development dependencies, fixed here in the lock
+file alone.
 
 ### Changed
 
