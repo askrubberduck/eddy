@@ -6,6 +6,11 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
+## 0.4.3 — 2026-10-17
+
+The README is rewritten: it opens on the problem, keeps one runnable program, and maps eddy's
+concepts onto Redux Toolkit and Zustand. The code is unchanged from 0.4.2.
+
 ## 0.4.2 — 2026-10-17
 
 Published to npm. Earlier versions went to GitHub Packages only; installing no longer needs a
