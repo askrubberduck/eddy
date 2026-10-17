@@ -1,17 +1,16 @@
 # eddy
 
-**A domain-sliced state manager for TypeScript, from [askrubberduck](https://github.com/askrubberduck).**
+**State for TypeScript applications, cut into domains that never import each other. From
+[askrubberduck](https://github.com/askrubberduck).**
 
-Declared actions, procedural commands, derived views that live in state, and named scopes. No Redux,
-no Zustand, no dependencies.
-
-Ask a rubber duck about your state and it says nothing, which is how you notice the answer was three
-domains, two commands and a view. eddy is that answer, written down.
+Explain your state to a rubber duck and somewhere in the middle of the sentence you hear it: this
+part is a search, that part is a history, and the history only cares when a search comes back. eddy
+lets you write the sentence down. No runtime dependencies.
 
 ## Sixty seconds
 
-A search box with a typeahead, and a history that remembers what was searched. Two domains, one
-command, one wire between them. Copy it whole; it runs.
+A typeahead and a history of what was searched: two domains, one command, one wire between them.
+Save it as `demo.mts`, run `npx tsx demo.mts`, and it prints what follows.
 
 ```ts
 import { cmd, createScope, defineDomain, reduce, view } from '@askrubberduck/eddy'
@@ -84,53 +83,37 @@ search.run.done
 Command 'search.run' was superseded by a newer call
 ```
 
-Everything eddy is for is in those five lines. Two calls went out; `latest` cancelled the first,
-aborted its signal, and rejected its promise by name. One outcome came back, and it folded into
-`search` and into `history` as one transaction, because `history` wired `search.run.done` without
-importing anything. The view `recent` is read like a field. The wildcard saw every action whose fold
-completed, in order.
+Two calls went out and one outcome came back. `latest` aborted the first call's signal and rejected
+its promise with `CommandAborted`, so the slow answer could never overwrite the fast one. The result
+updated `search` and `history` in one transaction, because `history` listed `search` as a neighbour
+and listens on `search.run.done`. `recent` is a derived value, read like a field. The `'*'` listener
+heard each action after it was applied, in order.
 
-## What you get
+## If you know Redux Toolkit
 
-- **Domains.** A named slice of state with its own actions, views and neighbours. The neighbours a
-  domain may read or emit into are declared in `uses`, and the type checker holds you to it.
-- **Two kinds of action.** A `reduce` folds synchronously. A `cmd` runs a handler with an
-  `AbortSignal`, and its `called`, `done`, `failed` and `finally` stages fold as ordinary actions,
-  so nothing else in the scope needs to know it was asynchronous. `latest` supersedes, `join` shares.
-- **Views in state.** A derived value is declared once, memoised on its input, and read beside the
-  fields it derives from. A neighbour reads it the same way.
-- **One address for everything.** `cart.add`, `cart.add.done`, `cart.add.failed`. A reducer in
-  another domain, an effect, a watcher, a test, and a wildcard tap all listen on the same strings.
-- **Scopes.** A scope hosts a set of domains and is an object you hold. Two scopes over the same
-  domains share nothing. Dispose one and it says so to everything that asks.
-- **Instances.** A domain declared `instanced` is held once per id, in the same scope as everything
-  else, so a per-row draft folds in the same transaction as the table it belongs to.
-- **A React binding** with a provider, a domain hook, a selector hook, and a per-mount instance
-  hook. **A testing module** that records actions and waits for a scope to settle.
-- **Refusals that say what to do.** A development build walks every value that enters state and
-  refuses what it cannot compare or freeze, by name, with the thing to carry instead. A production
-  build skips the walk and the freeze, and trusts you.
+The nearest neighbour for each piece, so you can place eddy without reading it all first.
 
-## What you do not get
+| Redux Toolkit                                               | eddy                                                                                                           |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| a slice                                                     | a domain, which also names the neighbours it may read and emit into, and the type checker holds it to the list |
+| `createAsyncThunk`, `pending`/`fulfilled`/`rejected`        | a `cmd`, whose `called`, `done`, `failed` and `finally` stages fold as ordinary actions                        |
+| `extraReducers` on another slice's action                   | `on`, keyed by the same address string the emitter uses                                                        |
+| `createSelector`                                            | a view: declared on the domain, memoised on its input, and present in state                                    |
+| listener middleware                                         | `effects` keyed by address, and `watch` on a value                                                             |
+| the store                                                   | a scope: an object you hold, as many as you like, sharing no state                                             |
+| `condition`, `cancelActiveListeners`, `createEntityAdapter` | `join` and `latest` on a command; a domain `instanced` per id, folding in the same transaction as the rest     |
 
-By design, and the reasons are on the [Design](https://github.com/askrubberduck/eddy/wiki/Design)
-page. No middleware, no plugins, no global store, no devtools bridge, no runtime registration of
-domains, no `Map` or `Set` in state. eddy is a kernel an application holds, not a platform other
-packages extend. If the thing you need is a component and two setters, `useState` is right there and
-the duck will not think less of you.
+From Zustand: a scope stands where the store did, and the hooks come from `createScopeHooks(scope)`
+in `@askrubberduck/eddy/react`.
 
-## Is it for you
+## Who it is not for
 
-The duck does not judge; it asks.
-
-- Do you have more than one slice of state, and do some of them need to react to what happens in
-  others without importing each other?
-- Do asynchronous operations have a beginning, an end and a failure that the rest of the
-  application wants to see as plain events?
-- Is there a derived value that three components compute three ways today?
-- Do you need two independent copies of the same state, such as a preview beside the real thing?
-
-Two yeses and it earns its place. None and it is a heavier thing than you need.
+- One component and two setters. `useState` already holds that.
+- An application that wants to plug things into its state manager. Nothing plugs into eddy;
+  [Design](https://github.com/askrubberduck/eddy/wiki/Design) says why.
+- State that holds a `Map`, a `Set`, a class instance or a function. State here is plain data, so
+  it can be compared, frozen in development and persisted.
+- A build that needs an ECMAScript module artifact. The package is CommonJS.
 
 ## Install
 
@@ -138,35 +121,42 @@ Two yeses and it earns its place. None and it is a heavier thing than you need.
 npm install @askrubberduck/eddy
 ```
 
-Node 20 or later; TypeScript 5.4 or later for the declarations; React 18 or 19 only
-if you import `@askrubberduck/eddy/react`. The artifact is CommonJS with an `exports` map, and the
-two subpaths have fallbacks for resolvers that predate it, so a React Native application on an
-older Metro bundles it too.
+Node 20 or later. TypeScript 5.4 or later for the declarations. React 18 or 19, only if you import
+`@askrubberduck/eddy/react`. `/react` and `/testing` have fallbacks for resolvers that predate
+`exports`, so a React Native application on an older Metro bundles them too.
 
-Until `1.0.0` a minor release may break a public API. `CHANGELOG.md` ships in the package and says
+Upgrading from 0.4.1 or earlier? Remove any `.npmrc` line that routes `@askrubberduck` to GitHub
+Packages.
+
+Until `1.0.0`, a minor release may break a public API. `CHANGELOG.md` ships in the package and says
 what changed.
 
 ## Read on
 
-The [wiki](https://github.com/askrubberduck/eddy/wiki) is the specification. Each page owns one
-contract and does not restate the others.
+The [wiki](https://github.com/askrubberduck/eddy/wiki) is the specification. Each question below is one page.
 
-| Page                                                                  | Answers                                                                |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [Domains](https://github.com/askrubberduck/eddy/wiki/Domains)         | How a domain is declared, typed and wired to its neighbours            |
-| [Actions](https://github.com/askrubberduck/eddy/wiki/Actions)         | Reducers, commands, stages, `latest`, `join`, and what `emit` promises |
-| [Views](https://github.com/askrubberduck/eddy/wiki/Views)             | Derived values that live in state and when they recompute              |
-| [State](https://github.com/askrubberduck/eddy/wiki/State)             | What state may hold, equality, freezing, and persistence               |
-| [Reactions](https://github.com/askrubberduck/eddy/wiki/Reactions)     | `on`, `subscribe`, `effects`, `watch`, and the order they run in       |
-| [Scopes](https://github.com/askrubberduck/eddy/wiki/Scopes)           | Creating, reading, inspecting and disposing a scope                    |
-| [Instances](https://github.com/askrubberduck/eddy/wiki/Instances)     | One domain, many ids, one transaction                                  |
-| [React](https://github.com/askrubberduck/eddy/wiki/React)             | The hooks, the provider, and server rendering                          |
-| [Testing](https://github.com/askrubberduck/eddy/wiki/Testing)         | Recording actions and waiting for a scope to settle                    |
-| [Diagnostics](https://github.com/askrubberduck/eddy/wiki/Diagnostics) | The logger, the error reporter, and what never reaches either          |
-| [Design](https://github.com/askrubberduck/eddy/wiki/Design)           | The positions the library holds, and what it refuses to build          |
+- How do I declare a domain and say what it may reach? [Domains](https://github.com/askrubberduck/eddy/wiki/Domains)
+- What does `emit` promise, and when is a command cancelled or shared? [Actions](https://github.com/askrubberduck/eddy/wiki/Actions)
+- When does a derived value recompute? [Views](https://github.com/askrubberduck/eddy/wiki/Views)
+- What may state hold, and how do I save and restore it? [State](https://github.com/askrubberduck/eddy/wiki/State)
+- Who hears an action, and in what order? [Reactions](https://github.com/askrubberduck/eddy/wiki/Reactions)
+- How do I create, inspect and dispose a scope? [Scopes](https://github.com/askrubberduck/eddy/wiki/Scopes)
+- How does one domain hold a row per id? [Instances](https://github.com/askrubberduck/eddy/wiki/Instances)
+- How does a component read and emit? [React](https://github.com/askrubberduck/eddy/wiki/React)
+- How do I test a domain without sleeping? [Testing](https://github.com/askrubberduck/eddy/wiki/Testing)
+- Where do errors go, and what never leaves the process? [Diagnostics](https://github.com/askrubberduck/eddy/wiki/Diagnostics)
+- Why is it built this way, and what does it decline to build? [Design](https://github.com/askrubberduck/eddy/wiki/Design)
 
-The repository ships a small shop that asserts twelve of these contracts by executing them, and
-`npm run check:example-runs` runs it against the source.
+`examples/shop` is a small shop that asserts twelve wiki contracts by running them.
+
+## Ask the duck
+
+- Which of your slices change because something happened somewhere else, and how does each one find
+  out today?
+- When an asynchronous call is replaced by a newer one, what stops the old answer from landing?
+- Is there a value three components derive three ways?
+- Have you ever needed a second copy of the same state, a preview beside the real thing, and what
+  did it cost?
 
 ## Working on it
 
@@ -179,14 +169,9 @@ npm run check:wiki-anchors  # every `file.ts#symbol` the wiki names exists
 npm run check:format
 ```
 
-The wiki lives in `wiki/` and is published from there; behaviour and its page move in the same
-commit. A branch lands on `main` as one squashed commit with the argument in its message.
+The wiki lives in `wiki/` and is published from there; behaviour and its page change in the same
+commit. A change lands on `main` through a pull request, squash-merged, with its argument in the
+description.
 
-## The duck
-
-[askrubberduck](https://github.com/askrubberduck) builds tools in the voice of the duck you explain
-your problem to. The duck does not judge, the duck does not repeat, the duck listens, and the duck
-helps you think a little deeper until you find your own answer. eddy tries to be that: it refuses
-loudly, once, with the reason and the remedy, and otherwise stays out of the way.
-
-MIT.
+MIT. askrubberduck builds tools in the voice of the duck you explain your problem to: it doesn't
+judge, doesn't repeat, listens, and helps you think until the answer is yours.
