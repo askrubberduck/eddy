@@ -6,6 +6,12 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
+## 0.4.5 — 2026-10-17
+
+Published to GitHub Packages again, beside npm, from the same tarball. A project whose `.npmrc`
+routes `@askrubberduck` to `https://npm.pkg.github.com` gets this version there; 0.4.2 and 0.4.4 are on
+npm only. The code is unchanged from 0.4.4.
+
 ## 0.4.4 — 2026-10-17
 
 The first published release of the 0.4.3 entry below. The `v0.4.3` tag was never published: its

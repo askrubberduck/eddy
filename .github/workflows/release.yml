@@ -121,3 +121,30 @@ jobs:
       # Suppress prepublishOnly: rebuilding here would delete the downloaded artifact.
       # No NODE_AUTH_TOKEN: the OIDC exchange is the only credential, so there is no secret to leak.
       - run: npm publish --ignore-scripts "$(ls ./release/*.tgz)"
+
+  # The same tarball, to GitHub Packages, for installs that route the scope there. The tarball's
+  # `publishConfig` names npm; the `@askrubberduck` scope line setup-node writes already outranks it,
+  # and `--registry` says so where it is read, since a CLI flag outranks `publishConfig` too. No
+  # `id-token` on this job: npm would otherwise try its OIDC exchange here as well.
+  publish-github-packages:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: '@askrubberduck'
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package-${{ github.sha }}
+          path: release
+
+      - run: npm publish --ignore-scripts --registry https://npm.pkg.github.com "$(ls ./release/*.tgz)"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
