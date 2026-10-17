@@ -85,19 +85,19 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    # Required reviewers for this environment are set in the repository settings, not here.
-    environment: github-packages
     permissions:
       contents: read
-      packages: write # The only credential this needs: GitHub Packages authenticates with GITHUB_TOKEN.
+      # npm trusted publishing: npm exchanges this job's OIDC token for the publish credential and
+      # signs provenance with it. It needs npm 11.5.1 or later, which no Node 22 release ships; Node
+      # 24 does.
+      id-token: write
     steps:
-      # `registry-url` is what writes the auth file; without it `NODE_AUTH_TOKEN` reaches nothing. It
-      # is written outside the workspace, so this job publishes without a checkout, as it always has.
+      # `registry-url` writes the `.npmrc` that points npm at the registry. It is written outside the
+      # workspace, so this job publishes without a checkout, as it always has.
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-          registry-url: https://npm.pkg.github.com
-          scope: '@askrubberduck'
+          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -119,6 +119,5 @@ jobs:
       # `owner/repo` shorthand, so a bare relative path is resolved as a GitHub git dependency and
       # the publish dies in `git ls-remote` having never touched a registry.
       # Suppress prepublishOnly: rebuilding here would delete the downloaded artifact.
+      # No NODE_AUTH_TOKEN: the OIDC exchange is the only credential, so there is no secret to leak.
       - run: npm publish --ignore-scripts "$(ls ./release/*.tgz)"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

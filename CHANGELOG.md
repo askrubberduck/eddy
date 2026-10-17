@@ -6,6 +6,13 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
+## 0.4.2 — 2026-10-17
+
+Published to npm. Earlier versions went to GitHub Packages only; installing no longer needs a
+registry line or a token. A project that added `@askrubberduck:registry=https://npm.pkg.github.com`
+to an `.npmrc` keeps resolving the scope there and never sees this version: delete that line. The
+code is unchanged from 0.4.1.
+
 ## 0.4.1 — 2026-10-13
 
 The first published release of the changes below. The `v0.4.0` tag was never published: the
