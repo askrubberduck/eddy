@@ -24,6 +24,12 @@ jobs:
             echo "::error::an internal finding identifier leaked out of the working docs — these name private review notes that no reader here can resolve"
             exit 1
           fi
+          # The README ships in the tarball, and release.yml refuses one that names a repository-only
+          # file. Checked here too, so a pull request finds out before a tag does.
+          if git grep -nIE '(test/[A-Za-z.-]+\.spec\.tsx?|wiki/[A-Za-z_/-]+\.md|examples/)' -- README.md; then
+            echo "::error::the README names a file the package does not ship — a consumer cannot resolve it"
+            exit 1
+          fi
 
   test:
     runs-on: ubuntu-latest

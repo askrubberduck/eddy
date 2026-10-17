@@ -147,7 +147,8 @@ The [wiki](https://github.com/askrubberduck/eddy/wiki) is the specification. Eac
 - Where do errors go, and what never leaves the process? [Diagnostics](https://github.com/askrubberduck/eddy/wiki/Diagnostics)
 - Why is it built this way, and what does it decline to build? [Design](https://github.com/askrubberduck/eddy/wiki/Design)
 
-`examples/shop` is a small shop that asserts twelve wiki contracts by running them.
+The repository holds a small shop that asserts twelve wiki contracts by running them, and
+`npm run check:example-runs` runs it against the source.
 
 ## Ask the duck
 

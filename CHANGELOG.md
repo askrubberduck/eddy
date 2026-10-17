@@ -6,6 +6,11 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
+## 0.4.4 — 2026-10-17
+
+The first published release of the 0.4.3 entry below. The `v0.4.3` tag was never published: its
+README named `examples/shop`, which the package does not ship, and the release refused it.
+
 ## 0.4.3 — 2026-10-17
 
 The README is rewritten: it opens on the problem, keeps one runnable program, and maps eddy's
