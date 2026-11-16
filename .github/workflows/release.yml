@@ -47,21 +47,21 @@ jobs:
       - run: npm test
       - name: Reject repository-only references in the built artifact
         run: |
-          if grep -rnIE '(test/[A-Za-z.-]+\.spec\.tsx?|wiki/[A-Za-z_/-]+\.md|examples/)' output README.md; then
+          if grep -rnIE '(test/[A-Za-z.-]+\.spec\.tsx?|wiki/[A-Za-z_/-]+\.md|examples/)' output README.md skills; then
             echo "::error::the tarball names a file it does not ship — a consumer cannot resolve it"
             exit 1
           fi
 
       - name: Reject internal references
         run: |
-          if git grep -nIE '/Users/|/home/[a-z]|~/(code|Documents|Desktop)' -- src README.md; then
+          if git grep -nIE '/Users/|/home/[a-z]|~/(code|Documents|Desktop)' -- src README.md skills; then
             echo "::error::a local path leaked into a public repository"
             exit 1
           fi
           # `wiki` is in scope for the same reason `src` is, and with more force: it is the
           # specification a consumer reads, and it is published to the GitHub wiki. One of these did
           # reach it.
-          if git grep -nIwE '[A-E][0-9]{1,3}' -- src wiki; then
+          if git grep -nIwE '[A-E][0-9]{1,3}' -- src wiki skills; then
             echo "::error::an internal finding identifier (e.g. D26) leaked into shipped code or the wiki — these name private review notes that consumers cannot resolve"
             exit 1
           fi

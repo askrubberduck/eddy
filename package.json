@@ -32,6 +32,7 @@
   "sideEffects": false,
   "files": [
     "output/**/*",
+    "skills/**/*",
     "react.js",
     "react.d.ts",
     "testing.js",

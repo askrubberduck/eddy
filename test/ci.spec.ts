@@ -15,14 +15,14 @@ describe('the internal-reference workflow gates', () => {
   }
 
   it('keeps the local-path scan over the sources that ship', () => {
-    expect(commandFor('/Users/')).to.match(/-- src README\.md wiki examples; then$/)
+    expect(commandFor('/Users/')).to.match(/-- src README\.md wiki examples skills; then$/)
   })
 
   // Three digits, not two: a two-digit bound silently stops covering identifiers once the record
   // passes its ninety-ninth entry. A bound that quietly stops matching is worse than no bound,
   // because the green check reads as coverage.
   it('keeps the finding-identifier scan over every place this repository carries prose', () => {
-    expect(commandFor('[0-9]{1,3}')).to.match(/-- src test wiki; then$/)
+    expect(commandFor('[0-9]{1,3}')).to.match(/-- src test wiki skills; then$/)
   })
 
   it('holds the publishing gate to the same bound, since it can publish without CI', () => {
