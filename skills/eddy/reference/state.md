@@ -71,7 +71,7 @@ Also refused:
 - an accessor or a non-enumerable property;
 - a value from another realm;
 - a `Date` subclass, or a `Date` with own properties;
-- a `__proto__` field name, in every build.
+- a `__proto__` field name (see below for where production checks it).
 
 ## Development and production
 
@@ -81,6 +81,8 @@ Also refused:
 - Do not call `Date.prototype.setTime` on state. The freeze cannot stop it. Make a new `Date`.
 - Production does not check or freeze. A mutating reducer keeps its mutation, even on rejection.
 - Production still refuses a stage that returns a non-object or writes a view key.
+- Production refuses `__proto__` at the top level of a stage result, and at any depth in `preloadedState`.
+- Production does not check a nested `__proto__` in a stage result. Do not put one there.
 
 ## Equality
 
@@ -97,7 +99,8 @@ const restored = createScope({ domains: [cart], preloadedState: saved })
 
 - `getWrittenState()` gives cloned written fields. It omits view keys. Save this, not `getState()`.
 - A preloaded domain is a partial. The scope merges it over the seed and computes the views.
-- A preload with a view key or a non-object is refused. An unknown domain is logged and ignored.
+- A preload with a view key or a non-object is refused. An unknown domain is ignored.
+- The scope logs an unknown preload domain only when `logLevel` is `'info'` or `'debug'`.
 - `JSON.stringify` throws on a `bigint` and turns a `Date` into a string. Revive it on load.
 - Prefer a numeric timestamp to a `Date` when state goes through JSON.
 
