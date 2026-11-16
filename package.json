@@ -110,6 +110,7 @@
   },
   "overrides": {
     "diff": "^8.0.3",
-    "serialize-javascript": "^7.1.0"
+    "serialize-javascript": "^7.1.0",
+    "strip-json-comments": "~5.0.3"
   }
 }
