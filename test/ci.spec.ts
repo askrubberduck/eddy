@@ -25,6 +25,10 @@ describe('the internal-reference workflow gates', () => {
     expect(commandFor('[0-9]{1,3}')).to.match(/-- src test wiki skills; then$/)
   })
 
+  it('keeps the repository-only-file scan over all prose the package ships', () => {
+    expect(commandFor('wiki/[A-Za-z_/-]+')).to.match(/-- README\.md skills; then$/)
+  })
+
   it('holds the publishing gate to the same bound, since it can publish without CI', () => {
     const found = publishing.split('\n').filter(line => line.includes('git grep') && line.includes('[A-E]'))
     expect(found, 'exactly one identifier scan in the publishing workflow').to.have.lengthOf(1)
