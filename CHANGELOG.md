@@ -6,7 +6,7 @@ repository.
 Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat the README states:
 **a minor release may break a public API until `1.0.0`.** That is what this document is for.
 
-## Unreleased
+## 0.4.7 — 2026-11-16
 
 Documentation only. The React page shows the binding running on Preact through a `preact/compat`
 alias, and a new Signals page builds a signal over `scope.read` and `scope.subscribe`; each has a
