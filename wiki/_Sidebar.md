@@ -9,6 +9,7 @@
 - [Scopes](Scopes)
 - [Instances](Instances)
 - [React](React)
+- [Signals](Signals)
 - [Testing](Testing)
 - [Diagnostics](Diagnostics)
 - [Design](Design)

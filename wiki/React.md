@@ -169,6 +169,31 @@ sides, its written state serialised with `getWrittenState()` and passed back as 
 the client. The hooks hand `useSyncExternalStore` the live read as its server snapshot, so a store
 that moves during the hydration pass is a recoverable mismatch, as it is for any external store.
 
+## Preact
+
+There is no Preact entry point, and none is needed: the binding imports only `react`, and only
+hooks `preact/compat` provides, `useSyncExternalStore` among them. Alias `react` to `preact/compat`
+in the bundler and `@askrubberduck/eddy/react` runs on Preact as it ships. In Vite:
+
+```js
+// vite.config.js
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      react: 'preact/compat',
+      'react-dom': 'preact/compat',
+      'react/jsx-runtime': 'preact/jsx-runtime',
+    },
+  },
+})
+```
+
+`@preact/preset-vite` sets the same aliases. The `react` peer is optional, so npm installs eddy
+without React. A Preact application that reads state through signals rather than hooks wants
+[Signals](Signals) instead.
+
 ## Packaging
 
 `@askrubberduck/eddy/react` is a subpath in the package's `exports` map, and a `react.js` at the
@@ -183,3 +208,5 @@ Metro bundles it. React 18 or 19 is a peer dependency, optional, and the suite r
   know the id? Pass the id. Shared by everyone? It is a plain domain.
 - Is a selector defined inline, and does its cost show? Define it once, outside the component or in
   a `useCallback`, and the cache does the rest.
+- Is the application on Preact? Does it render through hooks, where the alias is the whole story, or
+  through signals, where a component reads `.value` and no hook is involved?
