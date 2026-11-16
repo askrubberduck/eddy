@@ -15,7 +15,7 @@ listens, and it leaves you a little further along in your own thinking.
 | Word        | Meaning                                                                                                      |
 | ----------- | ------------------------------------------------------------------------------------------------------------ |
 | **domain**  | A named slice of state with its own actions, views and declared neighbours. `defineDomain` makes one.        |
-| **action**  | A thing that happens at an address. A `reduce` folds synchronously; a `cmd` runs a handler first.            |
+| **action**  | A thing that happens at an address. A `reduce` folds synchronously; a `cmd` folds, then runs a handler.      |
 | **address** | `domain.action`, and for a command also `domain.action.done` and `domain.action.failed`.                     |
 | **fold**    | One action drafted into every domain that answers to it, committed as one transaction or not at all.         |
 | **view**    | A derived value declared on a domain, memoised on its input, and read beside the fields it derives from.     |

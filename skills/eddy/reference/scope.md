@@ -66,7 +66,7 @@ export const scope = createScope({
 | `onUnhandledError` | `(error, action) => void`. It gets failures that have no caller. |
 
 - `createScope` throws when a neighbour in `uses` is not hosted.
-- It throws when a seed, a preload, a view or a watcher fails. The error names the scope.
+- It throws when a seed, a preload, a view or a watcher fails.
 - It reads each definition once. A later change to a definition has no effect.
 - The scope type is `Scope<'rows' | 'draft'>`. It types every address the scope accepts.
 - Create a scope for each part that needs its own state: a preview, a wizard, a server request.

@@ -29,6 +29,9 @@ jobs:
       # the published declarations at that floor, with skipLibCheck off.
       - run: npm run check:artifact
 
+      # Preact takes the React binding through a `preact/compat` alias, not an entry point of its own.
+      - run: npm run check:preact
+
       # The peer range admits React 18 and 19; devDependencies pin 18, so 19 is otherwise unguarded
       # and the range would be a claim nothing verifies.
       - name: Test against the other supported React major
