@@ -66,6 +66,10 @@ jobs:
       - if: matrix.node == 20
         run: npm run check:bundler
 
+      # Preact takes the React binding through a `preact/compat` alias, not an entry point of its own.
+      - if: matrix.node == 20
+        run: npm run check:preact
+
   # The executable example, the artifact compile at the consumer TypeScript floor, and the React 19
   # suite: see release-gate.yml. Both this workflow and release.yml call it so neither can carry a
   # copy of these steps that drifts from the other's.

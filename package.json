@@ -76,9 +76,11 @@
     "test": "mocha",
     "prepublishOnly": "npm run clean && npm run build",
     "check:circular": "dpdm --no-warning --no-tree --exit-code circular:1 './src/**/*.ts'",
-    "check:bundler": "npm run build && node scripts/check-bundler.mjs"
+    "check:bundler": "npm run build && node scripts/check-bundler.mjs",
+    "check:preact": "npm run build && node scripts/check-preact.mjs"
   },
   "devDependencies": {
+    "@preact/signals-core": "^1.14.5",
     "@testing-library/react": "^16.3.2",
     "@types/chai": "^5.2.3",
     "@types/mocha": "^10.0.10",
@@ -90,6 +92,7 @@
     "global-jsdom": "^29.0.0",
     "jsdom": "^29.1.1",
     "mocha": "^11.8.0",
+    "preact": "^11.2.0",
     "prettier": "^3.9.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
