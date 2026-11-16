@@ -51,8 +51,9 @@ const lines = domainSignal(scope, 'cart')
 
 `state` is a `computed`, so a reader cannot write to it; the scope is the only writer. `domain as
 never` hands the type to `D`: `read` refuses an instanced domain, and the refusal type is not
-exported. An instanced domain throws at the first `read`; read one instance through its handle
-from [Instances](Instances) instead.
+exported. The cast also lifts that refusal: given an instanced domain, `read` returns every
+instance keyed by id, while the signal's type still says one state. Read one instance through its
+handle from [Instances](Instances) instead.
 
 ## An effect over the signal
 

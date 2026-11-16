@@ -143,6 +143,7 @@ The [wiki](https://github.com/askrubberduck/eddy/wiki) is the specification. Eac
 - How do I create, inspect and dispose a scope? [Scopes](https://github.com/askrubberduck/eddy/wiki/Scopes)
 - How does one domain hold a row per id? [Instances](https://github.com/askrubberduck/eddy/wiki/Instances)
 - How does a component read and emit? [React](https://github.com/askrubberduck/eddy/wiki/React)
+- How do I hold a domain in a signal? [Signals](https://github.com/askrubberduck/eddy/wiki/Signals)
 - How do I test a domain without sleeping? [Testing](https://github.com/askrubberduck/eddy/wiki/Testing)
 - Where do errors go, and what never leaves the process? [Diagnostics](https://github.com/askrubberduck/eddy/wiki/Diagnostics)
 - Why is it built this way, and what does it decline to build? [Design](https://github.com/askrubberduck/eddy/wiki/Design)

@@ -7,14 +7,14 @@ description: Use for any work in a codebase that uses @askrubberduck/eddy. Cover
 
 eddy is a state manager with six terms. Use these terms and no synonyms.
 
-| Term        | Meaning                                                                                         |
-| ----------- | ----------------------------------------------------------------------------------------------- |
-| **domain**  | A named part of state with its actions, views and declared neighbours. `defineDomain` makes it. |
-| **action**  | A thing that occurs at an address. A `reduce` folds at once. A `cmd` runs a handler first.      |
-| **address** | `domain.action`. A command also has `domain.action.done` and `domain.action.failed`.            |
-| **fold**    | One action applied to every domain that answers it, as one transaction.                         |
-| **view**    | A value derived from one domain, memoised on its input, and read as a field.                    |
-| **scope**   | An object that hosts domains and holds their state. Two scopes share nothing.                   |
+| Term        | Meaning                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| **domain**  | A named part of state with its actions, views and declared neighbours. `defineDomain` makes it.  |
+| **action**  | A thing that occurs at an address. A `reduce` folds at once. A `cmd` folds, then runs a handler. |
+| **address** | `domain.action`. A command also has `domain.action.done` and `domain.action.failed`.             |
+| **fold**    | One action applied to every domain that answers it, as one transaction.                          |
+| **view**    | A value derived from one domain, memoised on its input, and read as a field.                     |
+| **scope**   | An object that hosts domains and holds their state. Two scopes share nothing.                    |
 
 ## What this is not
 
@@ -78,7 +78,8 @@ export const scope = createScope({ domains: [session, profile] })
 ## The rules
 
 **Register every domain in the `Domains` interface.** `DomainType<State, Actions, Views?, Uses?, Instanced?>`
-types every address. `defineDomain` must then match it key by key. A wrong kind or a missing key is a compile error.
+types every address. `defineDomain` must then match its actions key by key. A wrong kind or a missing action is a compile error.
+A missing view is not: it compiles and reads as `undefined`. Declare every view the type names.
 
 **Declare neighbours in `uses`.** The second argument of `defineDomain` lists them. Repeat the list
 as the fourth argument of `DomainType`. The types then refuse a read, an emit or a wire past the list.
