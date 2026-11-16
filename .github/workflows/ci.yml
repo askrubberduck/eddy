@@ -16,18 +16,18 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Reject internal references
         run: |
-          if git grep -nIE '/Users/|/home/[a-z]|~/(code|Documents|Desktop)' -- src README.md wiki examples; then
+          if git grep -nIE '/Users/|/home/[a-z]|~/(code|Documents|Desktop)' -- src README.md wiki examples skills; then
             echo "::error::a local path leaked into a public repository"
             exit 1
           fi
-          if git grep -nIwE '[A-E][0-9]{1,3}' -- src test wiki; then
+          if git grep -nIwE '[A-E][0-9]{1,3}' -- src test wiki skills; then
             echo "::error::an internal finding identifier leaked out of the working docs — these name private review notes that no reader here can resolve"
             exit 1
           fi
-          # The README ships in the tarball, and release.yml refuses one that names a repository-only
-          # file. Checked here too, so a pull request finds out before a tag does.
-          if git grep -nIE '(test/[A-Za-z.-]+\.spec\.tsx?|wiki/[A-Za-z_/-]+\.md|examples/)' -- README.md; then
-            echo "::error::the README names a file the package does not ship — a consumer cannot resolve it"
+          # The README and the skill ship in the tarball, and release.yml refuses one that names a
+          # repository-only file. Checked here too, so a pull request finds out before a tag does.
+          if git grep -nIE '(test/[A-Za-z.-]+\.spec\.tsx?|wiki/[A-Za-z_/-]+\.md|examples/)' -- README.md skills; then
+            echo "::error::the README or the skill names a file the package does not ship — a consumer cannot resolve it"
             exit 1
           fi
 

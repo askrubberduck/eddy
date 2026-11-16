@@ -159,6 +159,23 @@ The repository holds a small shop that asserts twelve wiki contracts by running 
 - Have you ever needed a second copy of the same state, a preview beside the real thing, and what
   did it cost?
 
+## Agent instructions
+
+The package ships agent instructions in `skills/eddy/`. `SKILL.md` gives the model and the rules.
+It routes to one file per topic in `reference/`, so an agent reads only the file its task needs.
+Point to them from `AGENTS.md`:
+
+```md
+## @askrubberduck/eddy
+
+Before you write a domain, a scope, a React binding or a test, locate the installed
+`@askrubberduck/eddy` package. Read `skills/eddy/SKILL.md` in it, then the `reference/` file it
+routes you to.
+```
+
+Nothing is copied, so nothing goes stale on upgrade. The entry says _locate_ and names no path,
+because pnpm and hoisted workspaces do not put the package in `node_modules/@askrubberduck/eddy/`.
+
 ## Working on it
 
 ```sh

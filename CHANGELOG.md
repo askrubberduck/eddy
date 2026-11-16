@@ -10,7 +10,11 @@ Versions follow [semantic versioning](https://semver.org/) with the `0.x` caveat
 
 Documentation only. The React page shows the binding running on Preact through a `preact/compat`
 alias, and a new Signals page builds a signal over `scope.read` and `scope.subscribe`; each has a
-check that fails if it stops working. The code is unchanged from 0.4.6.
+check that fails if it stops working.
+
+The package also ships agent instructions in `skills/eddy/`: a `SKILL.md` and one reference file per
+topic. The README section "Agent instructions" shows the `AGENTS.md` entry that points to them. The
+code is unchanged from 0.4.6.
 
 ## 0.4.6 — 2026-10-18
 
